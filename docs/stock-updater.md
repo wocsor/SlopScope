@@ -1,9 +1,9 @@
 # Stock updater compatibility
 
 An application-only SlopScope update is feasible on the analyzed stock V4.0.0
-firmware. A prototype package passed the original ARM updater offline and
-reached its success state. Installation through a physical USB drive has not
-been verified. FEL remains the validated installation method.
+firmware. A source-built package passed the original ARM updater offline and reached its
+success state. The owner subsequently reported successful installation on the
+other scope through the stock updater. FEL also remains available.
 
 The stock updater reads `Scope.update` from USB storage. After decoding the
 file it validates the package checksum, manifest checksum, model, version rules
@@ -71,9 +71,10 @@ behavior, flash programming or subsequent boot.
 Run the package through the stock UI on a backed-up unit, then compare the
 application, identity, factory records and boot behavior. The V3.1.1 dump shows
 a similar updater, but the prototype has only been traced against V4.0.0.
-No stock updater installation was attempted and the connected scope was not
-modified during this investigation. No distributable stock-update package is
-published yet.
+Those offline traces did not modify a scope. On 2026-11-17 the owner reported
+a successful stock-updater installation on the other scope. Its original stock
+version was not recorded, and a post-update application/factory readback comparison
+has not been performed on that unit.
 
 ## Source-built package and CI
 
@@ -85,7 +86,8 @@ or unit snapshot:
 .venv/bin/python -B tools/package_update.py
 ```
 
-The output is `build/update/Scope.update`. Copy that exact filename to the root
+The outputs are `build/update/Scope.update` and `build/update/SlopScope-fel.bin`.
+Both contain the same padded application payload. Copy `Scope.update` to the root
 of a FAT32 USB drive. The package enables application descriptor 4 only; it does
 not replace bootloaders, the FPGA, factory filesystem, settings journal or the
 separate boot-logo region. The SlopScope application contains its own boot-console
@@ -102,11 +104,16 @@ The exact November 17 package was accepted by the original V4 ARM updater offlin
 with success stages 10/11 and only the expected application and identity/version
 writes. Its application SHA-256 is
 `cccac2e9589a0d9255ec446880d444e00deb4fa45b4495c6bddc6802c1e19e6c`.
-Physical USB-drive qualification is still pending; this does not yet establish
-that the stock USB host stack reads and programs it correctly on hardware.
+The owner reported that the CI-built package installed successfully on the
+other scope. A brief Hanmatek logo before SlopScope is expected: the package
+retains BOOT1 and the existing logo region. That behavior is intentionally kept.
+This report establishes a successful boot, not a full calibration/flash comparison.
 
 The GitHub Actions workflow builds and packages from checked-in source and uploads
 an explicit artifact list. It excludes unit snapshots, research, full dumps and
 the stock-containing FEL DRAM helper. The artifact includes the MIT license,
 third-party notices, source commit, dependency/compiler versions and SHA256SUMS.
-CI upload is a build artifact, not an automatic GitHub Release publication.
+CI builds downloadable files only. Users flash `SlopScope-fel.bin` locally using
+[FEL instructions](fel-install.md), or copy `Scope.update` onto USB storage for
+the stock updater. No CI step loads or flashes a device. CI upload is a build
+artifact, not an automatic GitHub Release publication.

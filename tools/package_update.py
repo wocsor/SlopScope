@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package a source-built application for the recovered DOS1102 V4 USB-drive updater."""
+"""Build FEL and stock-updater installation files from a source-built application."""
 
 import argparse
 import hashlib
@@ -65,6 +65,7 @@ def package_application(image_dir, output, version):
     payload = container + bytes(-len(container) % SECTOR_BYTES)
     if APPLICATION_START + len(payload) > APPLICATION_END:
         raise ValueError("Application exceeds its stock flash slot")
+    (output / "SlopScope-fel.bin").write_bytes(payload)
     header = bytearray(300)
     header[4 : 4 + len(version)] = version.encode("ascii")
     header[20:29] = b"SlopScope"
@@ -93,12 +94,14 @@ def package_application(image_dir, output, version):
         "container_bytes": len(container),
         "application_flash_offset": APPLICATION_START,
         "application_flash_bytes": len(payload),
+        "fel_image_file": "SlopScope-fel.bin",
+        "fel_image_sha256": hashlib.sha256(payload).hexdigest(),
         "enabled_payloads": ["application"],
         "stock_updater_also_rewrites_identity_version": True,
         "stock_executable_or_unit_snapshot_input": False,
         "package_bytes": len(encoded),
         "package_sha256": hashlib.sha256(encoded).hexdigest(),
-        "qualification": "V4 parser verified offline; physical USB-drive installation pending",
+        "qualification": "Stock updater success reported by user; see docs/stock-updater.md",
     }
     (output / "update-manifest.json").write_text(json.dumps(result, indent=2) + "\n")
     return result

@@ -30,15 +30,15 @@ jobs:
           python -m pip install -r requirements.txt
       - name: Build the cold-boot application
         run: python -B tools/build.py
-      - name: Package the stock updater file
+      - name: Package the FEL binary and stock updater file
         run: python -B tools/package_update.py
       - name: Collect release artifacts
         run: |
           mkdir -p build/release
-          cp build/cold/scope.bin build/cold/scope.elf build/cold/manifest.json build/release/
-          cp build/update/Scope.update build/update/update-manifest.json build/release/
+          cp build/cold/scope.elf build/cold/manifest.json build/release/
+          cp build/update/SlopScope-fel.bin build/update/Scope.update build/update/update-manifest.json build/release/
           cp LICENSE THIRD_PARTY_NOTICES.md build/release/
-          cp docs/stock-updater.md RELEASE_READINESS.md build/release/
+          cp docs/stock-updater.md docs/fel-install.md RELEASE_READINESS.md build/release/
           python -m pip freeze > build/release/build-dependencies.txt
           clang-18 --version > build/release/toolchain.txt
           ld.lld-18 --version >> build/release/toolchain.txt

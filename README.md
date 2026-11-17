@@ -43,11 +43,17 @@ compiler discovery. A usable data cable is needed for high-speed negotiation.
 
 ## CI binaries
 
-Git contains source, not compiled firmware. GitHub Actions builds the cold-boot
-application and `Scope.update` on Ubuntu with Clang/LLD 18. Download the artifact
-named `SlopScope-<commit>` from a successful Build firmware run. It includes the
-application, updater file, manifests, checksums, licenses, source commit and build
-dependency/toolchain versions. CI needs no stock dump, unit snapshot or secret.
+Git contains source, not compiled firmware. GitHub Actions builds two installation
+files on Ubuntu with Clang/LLD 18:
+
+- `SlopScope-fel.bin`: flash the application slot at `0x349000` using FEL.
+- `Scope.update`: install using the stock firmware's USB-drive updater.
+
+Download the artifact named `SlopScope-<commit>` from a successful Build firmware
+run. It also includes the ELF, manifests, checksums, licenses, source commit and
+build dependency/toolchain versions. CI only builds and uploads files; it never
+connects to or flashes a scope. No stock dump, unit snapshot or secret is needed.
+See [FEL installation](docs/fel-install.md) for the flash offset and readback steps.
 
 The updater package currently targets DOS1102 stock V4.0.0 only. Check
 [updater qualification](docs/stock-updater.md) before installation. Other model

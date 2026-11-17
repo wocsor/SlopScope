@@ -242,3 +242,13 @@ boot to acquisition, with record 52 restored and CRC-valid high-speed USB frames
 Installed cold application SHA-256:
 `cccac2e9589a0d9255ec446880d444e00deb4fa45b4495c6bddc6802c1e19e6c`.
 No automated suite was run.
+
+## CI installation artifacts
+
+CI builds `SlopScope-fel.bin` for local application-slot flashing at `0x349000`
+and `Scope.update` for the stock USB-drive updater. Both use the same padded
+application container; CI never connects to a device. Binaries are workflow
+artifacts, not Git source files. The first CI run passed and its package was
+accepted by the original V4 updater offline. The owner then reported a successful
+stock-updater install on the other scope, retaining the brief pre-application
+Hanmatek logo. No post-update factory/flash comparison was made on that unit.
