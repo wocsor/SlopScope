@@ -1,56 +1,45 @@
 # SlopScope release readiness
 
-## Current installed build — 2026-11-17
+## Current installed CI build — 2026-11-17
 
 Application SHA-256:
-`cccac2e9589a0d9255ec446880d444e00deb4fa45b4495c6bddc6802c1e19e6c`
-(259,532 bytes). The update changed 25 application sectors, passed readback,
-matched the retained unit identity and preserved the live settings journal.
-Normal boot reached acquisition with settings record 52 restored, no boot/save
-error, factory records loaded and a CRC-valid bounded waveform over 480 Mb/s USB.
-The application and compressed install payload passed build/round-trip checks.
-No automated suite ran.
+`a34805b42868d84817eeab35962d70a6eec80b18c742244c841036b5a1570750`
+(259,584 bytes). This is the Ubuntu/Clang 18 GitHub Actions build. Its compressed
+FEL flash binary SHA-256 is
+`c7d8cc22390057efe59d0ad36c2f251bdb2cf00ff00d724494ae843e9b5b7bab`.
+The new CI FEL file matches the application payload of the previously downloaded
+CI updater byte-for-byte. It was flashed locally over FEL at `0x349000`, with
+26 application sectors readback-verified and identity/settings preserved.
+No logo, bootloader, FPGA or factory sectors were update targets.
+
+Normal boot reached acquisition without a boot error, restored journal record
+52 without a save error, loaded valid factory data and returned a CRC-valid
+waveform over 480 Mb/s USB. All mapped zero/slope, ADC gain and phase calibration
+fields match the retained unit record. The factory record differs only in one
+metadata byte at `0x8638` and its checksum after the stock-firmware interlude;
+the flash operation did not target the factory filesystem. No automated suite ran.
 
 The build removes the redundant READING BOOT LOGO message and includes the
-current MAX readouts and bounded-transfer support. Normal firmware omits the
-opt-in UART diagnostic implementation. Earlier observations below are historical
-and refer to their stated build hashes and settings records.
+Adafruit HUD font, MAX readouts and bounded-transfer support. Normal firmware
+omits the opt-in UART diagnostic implementation. Earlier observations below are
+historical and refer to their stated build hashes and settings records.
 
 The November 14 four-hour diagnostic recording finished with no captured USB
 transfer fault, a command counter of 907745 and continuing acquisition. This does
-not resolve earlier intermittent failures. Background inventory now avoids
-libusb enumeration; UART adds USB frame/SOF observations for subsequent captures.
+not resolve earlier intermittent failures. Background inventory avoids libusb
+enumeration; UART adds USB frame/SOF observations for subsequent captures.
 
-GitHub publication remains paused at the owner's request. The
-[code provenance inventory](docs/provenance.md) now distinguishes recovered
-hardware data from actual stock instruction copies. SlopScope implementation
-code is MIT-licensed. LittleFS source/license hashes were verified upstream,
-and build/update outputs carry the project license and full third-party notices.
-ESP32 fixture source and its dependent Pulse observation tool remain in research,
-outside this repository. Hardware usability and redistribution review are
-separate: `RELEASE_READY.json` records `publication_ready: false`.
+The source repository is on GitHub privately. The workflow only builds downloadable
+FEL/updater files; it does not connect to devices. The owner reported successful
+stock-updater installation on the other scope; an independent factory/flash
+readback comparison was not performed there. The brief retained Hanmatek logo
+before the application starts is intentionally unchanged.
 
-Status: **READY for an initial experimental release**, verified 2026-11-10.
-The machine-readable flag is [RELEASE_READY.json](RELEASE_READY.json).
-
-This release targets everyday scope operation and PC control. The previous
-installed build was qualified for an initial experimental release. The source
-cleanup preserves that functionality; it does not claim complete stock parity
-or independent accuracy certification.
-
-## Implemented
-
-- Two-channel live acquisition, LCD traces and USB waveform streaming.
-- Voltage/time scales, coupling, probe factors, voltage positions, visibility,
-  inversion and bandwidth controls.
-- Edge Auto/Normal/Single, Run/Stop/Force and trigger voltage controls.
-- Stock-derived Video controls with PAL acquisition observed; sampled Pulse
-  triggering as a CFW addition.
-- Cooperative rolling previews, 1K/10K records and capture progress reporting.
-- Autonomous boot with progress console, saved settings and unit-local factory
-  calibration reused in place. Optional zero/reference calibration is separate.
-- Measurements, cursors, math, FFT/XY and exports through the separate `hscope`
-  library and web UI projects, subject to acquisition-mode limitations.
+The [provenance inventory](docs/provenance.md) distinguishes recovered hardware
+data from actual stock instruction copies. Implementation code is MIT-licensed;
+LittleFS and the Adafruit font retain their verified upstream licenses. Artifacts
+carry the project license and full third-party notices. ESP32 fixture firmware
+and stock-containing loader binaries remain outside release contents.
 
 ## Cleanup verification
 
@@ -240,8 +229,9 @@ label preview was inspected. This font change passed flash readback and normal
 boot to acquisition, with record 52 restored and CRC-valid high-speed USB frames.
 
 Installed cold application SHA-256:
-`cccac2e9589a0d9255ec446880d444e00deb4fa45b4495c6bddc6802c1e19e6c`.
-No automated suite was run.
+`cccac2e9589a0d9255ec446880d444e00deb4fa45b4495c6bddc6802c1e19e6c`
+was the earlier local compiler build. The current installed CI build is identified
+at the top of this document. No automated suite was run.
 
 ## CI installation artifacts
 
