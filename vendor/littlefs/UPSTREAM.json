@@ -1,0 +1,43 @@
+{
+  "project": "littlefs-project/littlefs",
+  "tag": "v2.9.3",
+  "license": "BSD-3-Clause",
+  "verified_on": "2026-11-17",
+  "files": [
+    {
+      "file": "vendor/littlefs/lfs.c",
+      "upstream_url": "https://raw.githubusercontent.com/littlefs-project/littlefs/v2.9.3/lfs.c",
+      "sha256": "4a221443c1936be4d41d8f400cd2fd055695196acadef35fcb227eb7e90f6db5",
+      "upstream_sha256": "4a221443c1936be4d41d8f400cd2fd055695196acadef35fcb227eb7e90f6db5",
+      "identical": true
+    },
+    {
+      "file": "vendor/littlefs/lfs.h",
+      "upstream_url": "https://raw.githubusercontent.com/littlefs-project/littlefs/v2.9.3/lfs.h",
+      "sha256": "37cefbc6983f19ada481bda913199d917cbb8c82d53a43dca369d62f669c64e6",
+      "upstream_sha256": "37cefbc6983f19ada481bda913199d917cbb8c82d53a43dca369d62f669c64e6",
+      "identical": true
+    },
+    {
+      "file": "vendor/littlefs/lfs_util.c",
+      "upstream_url": "https://raw.githubusercontent.com/littlefs-project/littlefs/v2.9.3/lfs_util.c",
+      "sha256": "f2fbde533670560434bd9f5a547174cc7c5a4670a02c47b4bd85180dced8b2ec",
+      "upstream_sha256": "f2fbde533670560434bd9f5a547174cc7c5a4670a02c47b4bd85180dced8b2ec",
+      "identical": true
+    },
+    {
+      "file": "vendor/littlefs/lfs_util.h",
+      "upstream_url": "https://raw.githubusercontent.com/littlefs-project/littlefs/v2.9.3/lfs_util.h",
+      "sha256": "03e912a6e9894c9d10c61f5da22b89ebe0bb778af67972d7b67a5f160731bf72",
+      "upstream_sha256": "03e912a6e9894c9d10c61f5da22b89ebe0bb778af67972d7b67a5f160731bf72",
+      "identical": true
+    },
+    {
+      "file": "vendor/littlefs/LICENSE.md",
+      "upstream_url": "https://raw.githubusercontent.com/littlefs-project/littlefs/v2.9.3/LICENSE.md",
+      "sha256": "0cb4ff1daf5fdc1359c6a6ee3116092f08fc100c9d58b1b77ab17bfd801f856d",
+      "upstream_sha256": "0cb4ff1daf5fdc1359c6a6ee3116092f08fc100c9d58b1b77ab17bfd801f856d",
+      "identical": true
+    }
+  ]
+}

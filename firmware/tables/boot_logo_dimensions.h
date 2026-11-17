@@ -1,0 +1,2 @@
+#define BOOT_LOGO_WIDTH 160u
+#define BOOT_LOGO_HEIGHT 141u

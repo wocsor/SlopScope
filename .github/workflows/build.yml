@@ -1,0 +1,53 @@
+name: Build firmware
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  firmware:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      ARM_CLANG: clang-18
+      ARM_LD_LLD: ld.lld-18
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y clang-18 lld-18
+          python -m pip install -r requirements.txt
+      - name: Build the cold-boot application
+        run: python -B tools/build.py
+      - name: Package the stock updater file
+        run: python -B tools/package_update.py
+      - name: Collect release artifacts
+        run: |
+          mkdir -p build/release
+          cp build/cold/scope.bin build/cold/scope.elf build/cold/manifest.json build/release/
+          cp build/update/Scope.update build/update/update-manifest.json build/release/
+          cp LICENSE THIRD_PARTY_NOTICES.md build/release/
+          cp docs/stock-updater.md RELEASE_READINESS.md build/release/
+          python -m pip freeze > build/release/build-dependencies.txt
+          clang-18 --version > build/release/toolchain.txt
+          ld.lld-18 --version >> build/release/toolchain.txt
+          printf '%s\n' "$GITHUB_SHA" > build/release/source-commit.txt
+          cd build/release
+          sha256sum * > SHA256SUMS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: SlopScope-${{ github.sha }}
+          path: build/release/
+          if-no-files-found: error
+          retention-days: 30

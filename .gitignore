@@ -1,0 +1,14 @@
+/build/
+.venv/
+__pycache__/
+*.py[cod]
+*.o
+*.elf
+*.map
+*.bin
+*.s8
+*.npz
+*.update
+*.lzss
+.DS_Store
+.ruff_cache/

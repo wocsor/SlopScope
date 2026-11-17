@@ -1,0 +1,20 @@
+/* Stock cea18 successful self-test cleanup; see adc_normal.json. */
+const unsigned adc_normal_setup[][3] = {
+ {1,0,500u},
+ {1,0,500u},
+ {1,0,2u},
+ {0,0x88u,0x6c0000u},
+ {1,0,2u},
+ {1,0,10u},
+ {1,0,2u},
+ {0,0x88u,0x16c0000u},
+ {1,0,2u},
+ {1,0,10u},
+ {1,0,2u},
+ {0,0x88u,0x1e0127u},
+ {1,0,2u},
+ {1,0,10u},
+ {1,0,2u},
+ {0,0x88u,0x11e0127u},
+ {1,0,2u},
+};

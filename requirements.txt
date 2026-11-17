@@ -1,0 +1,4 @@
+numpy
+pyelftools
+Pillow
+pyusb>=1.2
