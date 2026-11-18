@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: firmware-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   firmware:
     runs-on: ubuntu-24.04
@@ -15,6 +19,8 @@ jobs:
     env:
       ARM_CLANG: clang-18
       ARM_LD_LLD: ld.lld-18
+    outputs:
+      release_tag: ${{ steps.version.outputs.release_tag }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -23,6 +29,23 @@ jobs:
         with:
           python-version: '3.12'
           cache: pip
+      - name: Select release version
+        id: version
+        run: |
+          python - <<'PY'
+          import os, re
+          branch = os.environ['GITHUB_REF_NAME']
+          tag, updater = '', 'VSlopScope-0.1'
+          if os.environ['GITHUB_REF'].startswith('refs/heads/release/'):
+              version = branch.removeprefix('release/')
+              if not re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?', version):
+                  raise SystemExit('Use a release/X.Y.Z or release/X.Y.Z-rc.1 branch')
+              tag, updater = 'v' + version, 'V' + version
+              if len(updater) > 15:
+                  raise SystemExit('Release version exceeds the stock updater 15-character field')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'release_tag={tag}\nupdater_version={updater}\n')
+          PY
       - name: Install build dependencies
         run: |
           sudo apt-get update
@@ -31,7 +54,9 @@ jobs:
       - name: Build the cold-boot application
         run: python -B tools/build.py
       - name: Package the FEL binary and stock updater file
-        run: python -B tools/package_update.py
+        env:
+          UPDATER_VERSION: ${{ steps.version.outputs.updater_version }}
+        run: python -B tools/package_update.py --version "$UPDATER_VERSION"
       - name: Collect release artifacts
         run: |
           mkdir -p build/release
@@ -51,3 +76,30 @@ jobs:
           path: build/release/
           if-no-files-found: error
           retention-days: 30
+
+  release:
+    if: github.event_name != 'pull_request' && startsWith(github.ref, 'refs/heads/release/')
+    needs: firmware
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_TAG: ${{ needs.firmware.outputs.release_tag }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: SlopScope-${{ github.sha }}
+          path: build/release
+      - name: Publish release with verified build assets
+        run: >-
+          python3 tools/publish_release.py
+          --repository "$GH_REPO"
+          --tag "$RELEASE_TAG"
+          --commit "$GITHUB_SHA"
+          --assets-dir build/release

@@ -115,5 +115,6 @@ the stock-containing FEL DRAM helper. The artifact includes the MIT license,
 third-party notices, source commit, dependency/compiler versions and SHA256SUMS.
 CI builds downloadable files only. Users flash `SlopScope-fel.bin` locally using
 [FEL instructions](fel-install.md), or copy `Scope.update` onto USB storage for
-the stock updater. No CI step loads or flashes a device. CI upload is a build
-artifact, not an automatic GitHub Release publication.
+the stock updater. No CI step loads or flashes a device. Ordinary branch builds use Actions artifacts. A `release/X.Y.Z` branch publishes
+the verified files to GitHub Releases with tag `vX.Y.Z`; see the release workflow
+in the repository README.

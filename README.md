@@ -60,6 +60,33 @@ The updater package currently targets DOS1102 stock V4.0.0 only. Check
 names and stock versions have not been qualified. Local and CI compiler versions
 can produce different application hashes; each manifest describes its own build.
 
+## Releases from a branch
+
+Push a version branch such as `release/0.1.0` to cut release `v0.1.0`:
+
+```sh
+git switch -c release/0.1.0
+git push -u origin release/0.1.0
+```
+
+The successful build uploads `SlopScope-fel.bin`, `Scope.update`, checksums,
+licenses and build metadata to GitHub Releases. CI stages the assets in a draft
+and publishes only after upload verification. The tag points to the exact built
+commit. Ordinary branches and pull requests only produce Actions artifacts.
+No extra secret is needed: the publishing job uses GitHub's token with repository
+contents permission. CI never connects to a scope.
+
+Use one version branch per release. After publication, rerunning the same commit
+leaves its assets unchanged; pushing a different commit to that version branch
+fails publication. Fixes use a new version, such as `release/0.1.1`. A branch such
+as `release/0.2.0-rc.1` creates a prerelease. The version after `release/` must fit
+within 14 characters because the stock updater reserves one character for `V`.
+The updater's destination version matches the branch, for example `V0.1.0`.
+
+Selecting a release branch in **Run workflow** also runs the release path. A
+failed draft upload can be retried for the same commit. Repository visibility
+still applies: releases in a private repository require access to that repo.
+
 ## RAM development
 
 The application builds entirely from source. The FEL DRAM helper additionally
