@@ -40,7 +40,7 @@ def verified_assets(directory, commit, tag):
         checksums[name] = digest
     required = {
         "SlopScope-fel.bin", "Scope.update", "LICENSE", "THIRD_PARTY_NOTICES.md",
-        "source-commit.txt", "update-manifest.json", "fel-install.md", "stock-updater.md",
+        "source-commit.txt", "update-manifest.json", "flashing.md", "status.md",
     }
     if not required.issubset(checksums):
         raise ValueError("Release package is missing required files")
@@ -94,7 +94,7 @@ def publish(repository, tag, commit, assets):
             f"Built from `{commit}`.\n\n"
             "- `SlopScope-fel.bin`: flash locally at `0x349000` using FEL.\n"
             "- `Scope.update`: stock DOS1102 V4.0.0 USB-drive updater.\n\n"
-            "Read the attached installation instructions and RELEASE_READINESS.md. "
+            "Read the attached flashing.md and status.md. "
             "Verify SHA256SUMS and retain LICENSE and THIRD_PARTY_NOTICES.md. "
             "The original pre-application logo is retained.\n"
         )

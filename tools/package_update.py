@@ -101,7 +101,7 @@ def package_application(image_dir, output, version):
         "stock_executable_or_unit_snapshot_input": False,
         "package_bytes": len(encoded),
         "package_sha256": hashlib.sha256(encoded).hexdigest(),
-        "qualification": "Stock updater success reported by user; see docs/stock-updater.md",
+        "qualification": "Stock updater success reported by user; see docs/flashing.md",
     }
     (output / "update-manifest.json").write_text(json.dumps(result, indent=2) + "\n")
     return result

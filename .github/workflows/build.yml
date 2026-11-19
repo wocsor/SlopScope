@@ -63,7 +63,7 @@ jobs:
           cp build/cold/scope.elf build/cold/manifest.json build/release/
           cp build/update/SlopScope-fel.bin build/update/Scope.update build/update/update-manifest.json build/release/
           cp LICENSE THIRD_PARTY_NOTICES.md build/release/
-          cp docs/stock-updater.md docs/fel-install.md RELEASE_READINESS.md build/release/
+          cp docs/flashing.md docs/status.md build/release/
           python -m pip freeze > build/release/build-dependencies.txt
           clang-18 --version > build/release/toolchain.txt
           ld.lld-18 --version >> build/release/toolchain.txt

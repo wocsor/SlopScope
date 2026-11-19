@@ -2,8 +2,7 @@
 
 SlopScope implementation code is licensed under the root [MIT license](LICENSE).
 Third-party material retains its original licenses, reproduced below. These
-notices do not grant rights over stock firmware. File-level provenance is
-recorded in [the provenance audit](docs/provenance.md).
+notices do not grant rights over stock firmware. Pinned revisions and source hashes are recorded in the vendor directories.
 
 ## LittleFS v2.9.3 — included in the scope application
 
@@ -109,6 +108,6 @@ Linux register documentation, libusb behavior and the ARM ABI were used as
 technical references. References do not grant permission to copy their source;
 no Linux, libusb, Apple SDK or ARM runtime implementation is vendored here.
 Hardware register addresses, configuration values and lookup data recovered from
-stock are documented as interoperability data in `docs/provenance.md`. They are
+stock are retained as interoperability data in the source. They are
 not automatically copies of a vendor implementation. Actual stock BOOT0
 instructions copied into the local FEL helper remain outside release contents.
