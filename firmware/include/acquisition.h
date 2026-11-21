@@ -20,4 +20,7 @@ int scope_acquisition_geometry(unsigned sample_rate_hz,
                                unsigned depth,
                                int32_t time_ns,
                                struct scope_acquisition_geometry *geometry);
+int scope_live_acquisition_geometry(unsigned rate_index,
+                                    int32_t time_ns,
+                                    struct scope_acquisition_geometry *geometry);
 #endif

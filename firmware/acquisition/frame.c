@@ -30,6 +30,17 @@ unsigned capture_alignment(void) {
                : 2;
 }
 
+int frame_channel_matches_live_range(unsigned channel_index) {
+    if (!scope_state.capture.live_enabled) {
+        return 1;
+    }
+    unsigned frame_range = scope_state.frame.words[8 + channel_index];
+    return frame_range == scope_state.channels.range[channel_index] &&
+           !(scope_state.analog.state == SETUP_RUNNING &&
+             scope_state.analog.job_channel == channel_index &&
+             scope_state.analog.job_range != frame_range);
+}
+
 void publish_frame(void) {
     scope_state.frame.channel_alignment = capture_alignment();
     scope_state.boot.console_active = 0;
@@ -101,7 +112,8 @@ void publish_frame(void) {
         (scope_state.configuration.active_features.bandwidth[1] << 1);
     scope_state.frame.extra_fields[3] = scope_state.configuration.active_features.trigger_family;
     scope_state.frame.extra_fields[4] =
-        (uint32_t)(scope_state.configuration.active_acquisition.horizontal_enabled
+        (uint32_t)(scope_state.configuration.active_acquisition.horizontal_enabled &&
+                           !scope_state.capture.capture_roll
                        ? scope_state.configuration.active_acquisition.horizontal_ns
                        : 0);
     scope_state.frame.extra_fields[5] = scope_state.trigger.forced;

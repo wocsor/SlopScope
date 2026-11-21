@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "slopscope-usb"
+version = "0.1.0"
+description = "SlopScope USB library and local viewer bridge"
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.11"
+dependencies = ["numpy>=1.26", "pyusb>=1.2"]
+
+[project.scripts]
+slopscope-usb = "slopscope_usb.cli:main"
+slopscope-bridge = "slopscope_usb.cli:bridge_main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

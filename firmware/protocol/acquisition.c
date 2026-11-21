@@ -22,8 +22,7 @@ unsigned capture_command(const uint8_t *command, unsigned length, uint8_t *reply
         if (command_equals(command, length, "ACQUIRE MODE AVERAGE") &&
             scope_state.capture.rate_index >= 16 && scope_state.capture.roll_live &&
             scope_state.trigger.configured.sweep != 2 &&
-            !scope_state.configuration.features.trigger_family &&
-            !scope_state.configuration.acquisition.horizontal_enabled) {
+            !scope_state.configuration.features.trigger_family) {
             return reply_write_text(reply, "ERR roll acquisition supports SAMPLE or PEAK\n");
         }
         scope_state.configuration.features.acquire_mode =
@@ -81,6 +80,25 @@ unsigned capture_command(const uint8_t *command, unsigned length, uint8_t *reply
         }
         scope_state.capture.normal_mode = command_equals(command, length, "CAPTURE MODE NORMAL");
         return reply_write_text(reply, "OK capture mode set\n");
+    }
+    if (command_equals(command, length, "DISPLAY TIMING")) {
+        const char *names[] = {"RENDER clear=",
+                               " erase=",
+                               " traces=",
+                               " annotations=",
+                               " measurements=",
+                               " tools=",
+                               " overlay="};
+        unsigned reply_length = 0;
+        for (unsigned index = 0; index < 7; index++) {
+            reply_length += reply_write_text(reply + reply_length, names[index]);
+            reply_length += reply_write_hex32(reply + reply_length,
+                                              scope_state.display.render_stage_ticks[index]);
+        }
+        reply_length += reply_write_text(reply + reply_length, " clears=");
+        reply_length += reply_write_hex32(reply + reply_length, scope_state.display.full_redraws);
+        reply[reply_length++] = '\n';
+        return reply_length;
     }
     if (command_equals(command, length, "DISPLAY STATUS")) {
         unsigned reply_length = reply_write_text(reply, "DISPLAY frames=");
@@ -171,10 +189,8 @@ unsigned capture_command(const uint8_t *command, unsigned length, uint8_t *reply
         }
         if (scope_state.configuration.acquisition.horizontal_enabled) {
             struct scope_acquisition_geometry geometry;
-            if (!scope_acquisition_geometry_ratio(
-                    sample_rate_numerator(index),
-                    sample_rate_denominator(index),
-                    10000,
+            if (!scope_live_acquisition_geometry(
+                    index,
                     scope_state.configuration.acquisition.horizontal_ns,
                     &geometry)) {
                 return reply_write_text(reply, "ERR horizontal offset outside new timebase\n");
@@ -402,10 +418,13 @@ unsigned record_command(const uint8_t *command, unsigned length, uint8_t *reply)
     if (command_equals(command, length, "HORIZONTAL STATUS")) {
         unsigned reply_length = reply_write_text(reply, "HORIZONTAL enabled=");
         reply_length += reply_write_hex32(reply + reply_length,
-                                          scope_state.configuration.acquisition.horizontal_enabled);
+                                          scope_state.configuration.acquisition.horizontal_enabled &&
+                                              !scope_state.capture.capture_roll);
         reply_length += reply_write_text(reply + reply_length, " offset_ns=");
         reply_length += reply_write_hex32(
-            reply + reply_length, (uint32_t)scope_state.configuration.acquisition.horizontal_ns);
+            reply + reply_length, scope_state.capture.capture_roll
+                                      ? 0
+                                      : (uint32_t)scope_state.configuration.acquisition.horizontal_ns);
         reply[reply_length++] = '\n';
         return reply_length;
     }
@@ -419,10 +438,8 @@ unsigned record_command(const uint8_t *command, unsigned length, uint8_t *reply)
         struct scope_acquisition_geometry geometry;
         if (!command_parse_signed(command + 18, length - 18, &value) || value < -1000000000 ||
             value > 1000000000 ||
-            !scope_acquisition_geometry_ratio(
-                sample_rate_numerator(scope_state.capture.rate_index),
-                sample_rate_denominator(scope_state.capture.rate_index),
-                10000,
+            !scope_live_acquisition_geometry(
+                scope_state.capture.rate_index,
                 value,
                 &geometry)) {
             return reply_write_text(reply, "ERR horizontal offset outside record\n");

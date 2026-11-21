@@ -19,6 +19,54 @@ display_configure_pin(unsigned port_base, unsigned pin, unsigned function, unsig
     MMIO32(pull_register) &= ~(3u << pull_shift);
     MMIO32(pull_register) |= pull_mode << pull_shift;
 }
+#if SCOPE_BACKLIGHT_PWM
+#define BACKLIGHT_PWM_CONTROL 0x01c21000u
+#define BACKLIGHT_PWM_PERIOD 0x01c21008u
+#define BACKLIGHT_PWM_ENABLE (1u << 21)
+#define BACKLIGHT_PWM_CLOCK (1u << 19)
+#define BACKLIGHT_PWM_ACTIVE_HIGH (1u << 20)
+#define BACKLIGHT_PWM_PERIOD_TICKS 200u
+
+static unsigned backlight_brightness_percent = 100;
+static int backlight_enabled;
+
+unsigned display_brightness(void) {
+    return backlight_brightness_percent;
+}
+
+void display_backlight(int enabled) {
+    backlight_enabled = enabled;
+    unsigned brightness = enabled ? backlight_brightness_percent : 0;
+    MMIO32(BACKLIGHT_PWM_CONTROL) &= ~BACKLIGHT_PWM_ENABLE;
+    if (!brightness || brightness == 100) {
+        display_configure_pin(0x01c208b4u, 5, 1, 0);
+        if (brightness) {
+            MMIO32(0x01c208c4u) |= 1u << 5;
+        } else {
+            MMIO32(0x01c208c4u) &= ~(1u << 5);
+        }
+        return;
+    }
+    /* Stock PWM1: 24 MHz / 120 / 200 = 1 kHz on PF5. */
+    MMIO32(BACKLIGHT_PWM_CONTROL) &= ~(0x3fffu << 15);
+    MMIO32(BACKLIGHT_PWM_PERIOD) =
+        ((BACKLIGHT_PWM_PERIOD_TICKS - 1) << 16) | (BACKLIGHT_PWM_PERIOD_TICKS * brightness / 100);
+    MMIO32(BACKLIGHT_PWM_CONTROL) |= BACKLIGHT_PWM_CLOCK | BACKLIGHT_PWM_ACTIVE_HIGH;
+    display_configure_pin(0x01c208b4u, 5, 4, 0);
+    MMIO32(BACKLIGHT_PWM_CONTROL) |= BACKLIGHT_PWM_ENABLE;
+}
+
+void display_set_brightness(unsigned brightness_percent) {
+    if (brightness_percent < 1) {
+        brightness_percent = 1;
+    }
+    if (brightness_percent > 100) {
+        brightness_percent = 100;
+    }
+    backlight_brightness_percent = brightness_percent;
+    display_backlight(backlight_enabled);
+}
+#else
 void display_backlight(int enabled) {
     display_configure_pin(0x01c208b4u, 5, 1, 0);
     if (enabled) {
@@ -27,6 +75,7 @@ void display_backlight(int enabled) {
         MMIO32(0x01c208c4u) &= ~(1u << 5);
     }
 }
+#endif
 /* BOOT1 assumes the BOOT0 clock setup has already run */
 void display_prepare_from_fel(void) {
     MMIO32(CLOCK_CONTROL_BASE + 0x100) |= 0x05000000u;

@@ -1,17 +1,20 @@
 #include "scope_internal.h"
 
 #include "hud_font.h"
+#include "panel_tools.h"
 
 static unsigned
 hud_format_scaled_value(char *text, int64_t value, const char *unit, uint64_t divisor);
-static unsigned hud_format_voltage(char *text, int64_t voltage_uv);
-static unsigned hud_format_time(char *text, int64_t time_ns);
+unsigned hud_format_voltage(char *text, int64_t voltage_uv);
+unsigned hud_format_time(char *text, int64_t time_ns);
 static unsigned plot_rate_hz(void);
-static void hud_draw_status(void);
+static unsigned plot_rate_index(void);
 static void hud_draw_channel_markers(void);
 
 unsigned hud_text(unsigned x, unsigned y, const char *text, unsigned color) {
     volatile uint16_t *framebuffer = scope_state.display.draw_framebuffer;
+    color = display_foreground_color(color);
+    unsigned background = display_background_color();
     while (*text && x + 6 <= 800) {
         unsigned character_code = (unsigned char)*text++;
         for (unsigned row = 0; row < 7; row++) {
@@ -19,7 +22,7 @@ unsigned hud_text(unsigned x, unsigned y, const char *text, unsigned color) {
                 framebuffer[(y + row) * 800 + x + column] =
                     (character_code < 128 && (hud_font[character_code][row] & (16u >> column)))
                         ? color
-                        : 0;
+                        : background;
             }
         }
         x += 6;
@@ -81,7 +84,19 @@ hud_format_scaled_value(char *text, int64_t value, const char *unit, uint64_t di
     return text_length;
 }
 
-static unsigned hud_format_voltage(char *text, int64_t voltage_uv) {
+unsigned hud_format_quantity(char *text, int64_t value_micro, const char *unit) {
+    return hud_format_scaled_value(text, value_micro, unit, 1000000);
+}
+
+unsigned hud_format_frequency(char *text, uint64_t frequency_millihz) {
+    return frequency_millihz >= 1000000000
+               ? hud_format_scaled_value(text, frequency_millihz, "MHz", 1000000000)
+           : frequency_millihz >= 1000000
+               ? hud_format_scaled_value(text, frequency_millihz, "kHz", 1000000)
+               : hud_format_scaled_value(text, frequency_millihz, "Hz", 1000);
+}
+
+unsigned hud_format_voltage(char *text, int64_t voltage_uv) {
     int64_t magnitude = voltage_uv < 0 ? -voltage_uv : voltage_uv;
     return magnitude >= 1000000000LL ? hud_format_scaled_value(text, voltage_uv, "kV", 1000000000u)
            : magnitude >= 1000000    ? hud_format_scaled_value(text, voltage_uv, "V", 1000000)
@@ -89,7 +104,7 @@ static unsigned hud_format_voltage(char *text, int64_t voltage_uv) {
                                      : hud_format_scaled_value(text, voltage_uv, "uV", 1);
 }
 
-static unsigned hud_format_time(char *text, int64_t time_ns) {
+unsigned hud_format_time(char *text, int64_t time_ns) {
     int64_t magnitude = time_ns < 0 ? -time_ns : time_ns;
     return magnitude >= 1000000000LL ? hud_format_scaled_value(text, time_ns, "s", 1000000000u)
            : magnitude >= 1000000    ? hud_format_scaled_value(text, time_ns, "ms", 1000000)
@@ -98,9 +113,11 @@ static unsigned hud_format_time(char *text, int64_t time_ns) {
 }
 
 static unsigned plot_rate_hz(void) {
-    return scope_state.frame.words[0] == 0x31435348 && scope_state.frame.words[5]
-               ? scope_state.frame.words[5]
-               : sample_rates[scope_state.capture.rate_index][2];
+    return sample_rate_numerator(plot_rate_index());
+}
+static unsigned plot_rate_index(void) {
+    return scope_state.frame.sequence ? scope_state.frame.words[14]
+                                      : scope_state.capture.rate_index;
 }
 
 void hud_draw_usb_status(void) {
@@ -110,11 +127,7 @@ void hud_draw_usb_status(void) {
     };
     volatile uint16_t *framebuffer = scope_state.display.draw_framebuffer;
     unsigned activity = usb_activity_flags();
-    for (unsigned y = 0; y < 26; y++) {
-        for (unsigned x = 742; x < 798; x++) {
-            framebuffer[y * 800 + x] = 0;
-        }
-    }
+    display_fill_rectangle(742, 0, 56, 26, display_background_color());
     if (!(activity & USB_CLIENT_CONNECTED)) {
         return;
     }
@@ -123,28 +136,24 @@ void hud_draw_usb_status(void) {
     for (unsigned row = 0; row < 4; row++) {
         for (unsigned column = 0; column < 4; column++) {
             framebuffer[(row + 5) * 800 + 763 + column] =
-                activity & USB_TRANSMIT_ACTIVE ? 0x07e0 : 0x2104;
+                activity & USB_TRANSMIT_ACTIVE ? display_foreground_color(0x07e0) : 0x2104;
             framebuffer[(row + 16) * 800 + 763 + column] =
-                activity & USB_RECEIVE_ACTIVE ? 0xffe0 : 0x2104;
+                activity & USB_RECEIVE_ACTIVE ? display_foreground_color(0xffe0) : 0x2104;
         }
     }
     for (unsigned row = 0; row < 20; row++) {
         for (unsigned column = 0; column < 16; column++) {
-            framebuffer[(row + 3) * 800 + 778 + column] =
-                usb_icon_rows[row] & (1u << (15 - column)) ? 0xffff : 0;
+            framebuffer[(row + 3) * 800 + 778 + column] = usb_icon_rows[row] & (1u << (15 - column))
+                                                              ? display_foreground_color(0xffff)
+                                                              : display_background_color();
         }
     }
 }
 
-static void hud_draw_status(void) {
-    volatile uint16_t *framebuffer = scope_state.display.draw_framebuffer;
+void hud_draw_status(void) {
     char label[28];
     unsigned x = 8;
-    for (unsigned y = 0; y < 26; y++) {
-        for (unsigned i = 0; i < 800; i++) {
-            framebuffer[y * 800 + i] = 0;
-        }
-    }
+    display_fill_rectangle(0, 0, 800, 26, display_background_color());
     for (unsigned channel_index = 0; channel_index < 2; channel_index++) {
         unsigned color = channel_index ? 0x07ff : 0xffe0;
         struct scope_voltage_cal voltage_calibration;
@@ -166,10 +175,19 @@ static void hud_draw_status(void) {
     x = hud_text(x, 4, "  M:", 0xffff);
     hud_format_time(label,
                     scope_ratio((int64_t)scope_state.display.view_points * 1000000000LL *
-                                    sample_rate_denominator(scope_state.frame.words[14]),
+                                    sample_rate_denominator(plot_rate_index()),
                                 (uint64_t)plot_rate_hz() * DISPLAY_GRID_COLUMNS));
     x = hud_text(x, 4, label, 0xffff);
-    hud_text(x, 4, "/DIV", 0xffff);
+    x = hud_text(x, 4, "/DIV  H:", 0xffff);
+    int32_t horizontal_offset_ns = scope_state.configuration.acquisition.horizontal_enabled &&
+                                           !scope_state.capture.capture_roll
+                                       ? scope_state.configuration.acquisition.horizontal_ns
+                                       : 0;
+    if (horizontal_offset_ns > 0) {
+        x = hud_text(x, 4, "+", 0xffff);
+    }
+    hud_format_time(label, horizontal_offset_ns);
+    hud_text(x, 4, label, 0xffff);
     x = hud_text(8,
                  16,
                  scope_state.capture.live_enabled ? "RUN " : "STOP ",
@@ -210,129 +228,97 @@ static void hud_draw_status(void) {
              : scope_state.configuration.features.acquire_mode == 2 ? "AVG"
                                                                     : "SAMPLE",
              0xffff);
-    hud_draw_usb_status();
 }
 
-static void hud_draw_channel_markers(void) {
+static __attribute__((section(".panel_text"), noinline)) void hud_draw_labeled_arrow(
+    unsigned tip_x, int center_y, unsigned width, unsigned color, const char *label) {
     volatile uint16_t *framebuffer = scope_state.display.draw_framebuffer;
-    /* Keep only channel zero markers; scale and time are in the header. */
-    for (unsigned y = 27; y < 480; y++) {
-        for (unsigned x = 0; x < DISPLAY_PLOT_LEFT; x++) {
-            framebuffer[y * 800 + x] = 0;
-        }
-        for (unsigned x = DISPLAY_PLOT_LEFT + DISPLAY_PLOT_WIDTH + 1; x < 800; x++) {
-            framebuffer[y * 800 + x] = 0;
-        }
-        if (y > DISPLAY_PLOT_TOP + DISPLAY_PLOT_HEIGHT) {
-            for (unsigned x = DISPLAY_PLOT_LEFT; x <= DISPLAY_PLOT_LEFT + DISPLAY_PLOT_WIDTH; x++) {
-                framebuffer[y * 800 + x] = 0;
-            }
+    unsigned fill = display_foreground_color(color);
+    unsigned ink = display_background_color();
+    for (int offset_y = -6; offset_y <= 6; offset_y++) {
+        unsigned inset = offset_y < 0 ? -offset_y : offset_y;
+        for (unsigned offset_x = inset; offset_x < width; offset_x++) {
+            framebuffer[(center_y + offset_y) * 800 + tip_x + offset_x] = fill;
         }
     }
-    for (unsigned channel_index = 0; channel_index < 2; channel_index++) {
-        int zero = 240 - scope_state.channels.position_millidivisions[channel_index] * 50 / 1000;
-        if (scope_state.channels.visible[channel_index] && zero >= 40 && zero <= 440) {
-            for (int arrow_offset_y = -3; arrow_offset_y <= 3; arrow_offset_y++) {
-                for (int arrow_offset_x = (arrow_offset_y < 0 ? -arrow_offset_y : arrow_offset_y);
-                     arrow_offset_x < 4;
-                     arrow_offset_x++) {
-                    framebuffer[(zero + arrow_offset_y) * 800 +
-                                (DISPLAY_PLOT_LEFT + DISPLAY_PLOT_WIDTH + 1 + arrow_offset_x)] =
-                        channel_index ? 0x07ff : 0xffe0;
+    unsigned text_x = tip_x + 6;
+    while (*label) {
+        unsigned character_code = (unsigned char)*label++;
+        for (unsigned row = 0; row < 7; row++) {
+            for (unsigned column = 0; column < 5; column++) {
+                if (hud_font[character_code][row] & (16u >> column)) {
+                    framebuffer[(center_y - 3 + row) * 800 + text_x + column] = ink;
                 }
             }
         }
+        text_x += 6;
+    }
+}
+
+static __attribute__((section(".panel_text"), noinline)) void hud_draw_channel_markers(void) {
+    unsigned background = display_background_color();
+    display_fill_rectangle(0, 27, DISPLAY_PLOT_LEFT, 453, background);
+    display_fill_rectangle(DISPLAY_PLOT_LEFT + DISPLAY_PLOT_WIDTH + 1,
+                           27,
+                           800 - DISPLAY_PLOT_LEFT - DISPLAY_PLOT_WIDTH - 1,
+                           453,
+                           background);
+    display_fill_rectangle(DISPLAY_PLOT_LEFT,
+                           DISPLAY_PLOT_TOP + DISPLAY_PLOT_HEIGHT + 1,
+                           DISPLAY_PLOT_WIDTH + 1,
+                           479 - DISPLAY_PLOT_TOP - DISPLAY_PLOT_HEIGHT,
+                           background);
+    if (panel_math_mode() == 3 || panel_math_mode() == 6) {
+        return;
+    }
+    unsigned marker_left = DISPLAY_PLOT_LEFT + DISPLAY_PLOT_WIDTH + 1;
+    for (unsigned channel = 0; channel < 2; channel++) {
+        int zero_y = 240 - scope_state.channels.position_millidivisions[channel] * 50 / 1000;
+        if (scope_state.channels.visible[channel] && zero_y >= 40 && zero_y <= 440) {
+            hud_draw_labeled_arrow(marker_left + channel * 12,
+                                   zero_y,
+                                   12,
+                                   channel ? 0x07ff : 0xffe0,
+                                   channel ? "2" : "1");
+        }
     }
     if (scope_state.trigger.enabled) {
-        unsigned channel_index = scope_state.trigger.configured.source;
-        int zero = 240 - scope_state.channels.position_millidivisions[channel_index] * 50 / 1000;
+        unsigned channel = scope_state.trigger.configured.source;
+        int zero_y = 240 - scope_state.channels.position_millidivisions[channel] * 50 / 1000;
         int pixels =
             scope_state.trigger.configured.use_code
                 ? (int)scope_ratio((int64_t)scope_state.trigger.configured.code * 25, 13) -
-                      scope_state.channels.position_millidivisions[channel_index] * 50 / 1000
-                : (int)scope_ratio(
-                      (int64_t)scope_state.trigger.configured.level_uv * 50,
-                      (uint64_t)scope_scale_mv(scope_state.channels.range[channel_index]) * 1000 *
-                          scope_state.channels.probe_multiplier[channel_index]);
-        int y = zero - pixels * (scope_state.channels.inverse[channel_index] ? -1 : 1);
-        if (y < 40) {
-            y = 40;
+                      scope_state.channels.position_millidivisions[channel] * 50 / 1000
+                : (int)scope_ratio((int64_t)scope_state.trigger.configured.level_uv * 50,
+                                   (uint64_t)scope_scale_mv(scope_state.channels.range[channel]) *
+                                       1000 * scope_state.channels.probe_multiplier[channel]);
+        int trigger_y = zero_y - pixels * (scope_state.channels.inverse[channel] ? -1 : 1);
+        if (trigger_y < 40) {
+            trigger_y = 40;
+        } else if (trigger_y > 440) {
+            trigger_y = 440;
         }
-        if (y > 440) {
-            y = 440;
-        }
-        for (int arrow_offset_y = -4; arrow_offset_y <= 4; arrow_offset_y++) {
-            for (int arrow_offset_x = (arrow_offset_y < 0 ? -arrow_offset_y : arrow_offset_y);
-                 arrow_offset_x < 5;
-                 arrow_offset_x++) {
-                framebuffer[(y + arrow_offset_y) * 800 + DISPLAY_PLOT_LEFT + DISPLAY_PLOT_WIDTH +
-                            11 + arrow_offset_x] = 0xffff;
-            }
-        }
+        hud_draw_labeled_arrow(marker_left + 24, trigger_y, 19, 0xffff, channel ? "T2" : "T1");
     }
-    hud_draw_status();
 }
 
 void display_annotations(void) {
-    static unsigned previous[2][20];
-    struct scope_voltage_cal cal0, cal1;
-    scope_get_voltage_cal(0, scope_state.channels.range[0], &cal0);
-    scope_get_voltage_cal(1, scope_state.channels.range[1], &cal1);
-    unsigned keys[20] = {scope_state.channels.range[0],
-                         scope_state.channels.range[1],
-                         (unsigned)scope_state.channels.position_millidivisions[0],
-                         (unsigned)scope_state.channels.position_millidivisions[1],
-                         scope_state.channels.probe_multiplier[0],
-                         scope_state.channels.probe_multiplier[1],
-                         scope_state.channels.visible[0],
-                         scope_state.channels.visible[1],
-                         scope_state.display.view_start,
-                         scope_state.display.view_points,
-                         plot_rate_hz(),
-                         cal0.valid | (cal1.valid << 2) | (scope_state.channels.inverse[0] << 4) |
-                             (scope_state.channels.inverse[1] << 5),
-                         scope_state.capture.live_enabled,
-                         scope_state.trigger.enabled,
-                         scope_state.trigger.configured.source,
-                         scope_state.trigger.configured.slope,
-                         scope_state.trigger.configured.sweep,
-                         scope_state.trigger.configured.use_code,
-                         (unsigned)scope_state.trigger.configured.code,
-                         (unsigned)scope_state.trigger.configured.level_uv};
-    unsigned axes = !scope_state.display.draw_buffer_valid,
-             hud = !scope_state.display.draw_buffer_valid;
-    for (unsigned i = 0; i < 20; i++) {
-        if (keys[i] != previous[scope_state.display.draw_buffer_index][i]) {
-            axes = 1;
-        }
-    }
-    if (scope_state.display.display_redraw_requested) {
-        axes = 1;
-    }
-    if (axes) {
-        hud_draw_channel_markers();
-    } else if (hud) {
-        hud_draw_status();
-    }
-    for (unsigned i = 0; i < 20; i++) {
-        previous[scope_state.display.draw_buffer_index][i] = keys[i];
-    }
+    hud_draw_channel_markers();
 }
 
 void hud_draw_measurements(void) {
-    volatile uint16_t *framebuffer = scope_state.display.draw_framebuffer;
-    for (unsigned y = 454; y < 480; y++) {
-        for (unsigned x = DISPLAY_PLOT_LEFT; x < DISPLAY_PLOT_LEFT + DISPLAY_PLOT_WIDTH; x++) {
-            framebuffer[y * 800 + x] = 0;
-        }
-    }
+    display_fill_rectangle(
+        DISPLAY_PLOT_LEFT, 458, DISPLAY_PLOT_WIDTH, 7, display_background_color());
+    display_fill_rectangle(
+        DISPLAY_PLOT_LEFT, 470, DISPLAY_PLOT_WIDTH, 7, display_background_color());
     for (unsigned channel = 0; channel < 2; channel++) {
         unsigned color = channel ? 0x07ff : 0xffe0;
         unsigned x = hud_text(channel ? 425 : 25, 458, channel ? "CH2 VPP: " : "CH1 VPP: ", color);
         unsigned maximum_x =
             hud_text(channel ? 425 : 25, 470, channel ? "CH2 MAX: " : "CH1 MAX: ", color);
         unsigned range = scope_state.frame.words[8 + channel];
-        if (!scope_state.frame.valid_count || range >= 14 ||
+        if (!frame_channel_matches_live_range(channel) || !scope_state.frame.valid_count ||
+            range >= 14 ||
             scope_state.frame.calibration_ids[channel] !=
                 scope_adc_calibration_id(channel, range)) {
             hud_text(x, 458, "--", color);

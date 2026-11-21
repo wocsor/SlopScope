@@ -12,3 +12,8 @@ __pycache__/
 *.lzss
 .DS_Store
 .ruff_cache/
+
+.venv-usb/
+*.egg-info/
+/host/build/
+/host/dist/

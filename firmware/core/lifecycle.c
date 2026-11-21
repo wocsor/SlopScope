@@ -28,17 +28,20 @@ static int boot_issue(const char *command) {
 void scope_lifecycle_poll(void) {
     scope_boot_cursor_poll();
     settings_restore_poll();
-    if (!SCOPE_VOLATILE_SETTINGS && scope_state.boot.stage == BOOT_ACQUIRING &&
-        !scope_state.settings.save_held && !scope_state.record.active &&
-        scope_state.settings.dirty &&
+    if (scope_state.settings.dirty && scope_settings_write_blocked()) {
+        scope_state.settings.save_error = 1;
+    }
+    if (!SCOPE_VOLATILE_SETTINGS && !scope_settings_write_blocked() &&
+        scope_state.boot.stage == BOOT_ACQUIRING && !scope_state.settings.save_held &&
+        !scope_state.record.active && scope_state.settings.dirty &&
         (timer_elapsed_ms(scope_state.settings.changed) >= scope_state.settings.save_delay) &&
         scope_state.analog.state != SETUP_RUNNING && scope_state.adc.state != SETUP_RUNNING &&
         scope_state.settings.restore_state == 2) {
         capture_abort_wait();
     }
-    if (!SCOPE_VOLATILE_SETTINGS && scope_state.boot.stage == BOOT_ACQUIRING &&
-        !scope_state.settings.save_held && !scope_state.record.active &&
-        scope_state.settings.dirty &&
+    if (!SCOPE_VOLATILE_SETTINGS && !scope_settings_write_blocked() &&
+        scope_state.boot.stage == BOOT_ACQUIRING && !scope_state.settings.save_held &&
+        !scope_state.record.active && scope_state.settings.dirty &&
         (timer_elapsed_ms(scope_state.settings.changed) >= scope_state.settings.save_delay) &&
         !capture_busy() && scope_state.analog.state != SETUP_RUNNING &&
         scope_state.adc.state != SETUP_RUNNING && scope_state.settings.restore_state == 2) {
@@ -133,6 +136,10 @@ void scope_lifecycle_poll(void) {
     } else if (scope_state.boot.stage == BOOT_RESTORE_SETTINGS) {
         if (scope_state.settings.restore_state == 2) {
             scope_boot_log("STARTING LIVE ACQUISITION");
+            if (scope_settings_need_migration() && !SCOPE_VOLATILE_SETTINGS) {
+                scope_state.settings.dirty = 1;
+                scope_state.settings.changed = timer_milliseconds();
+            }
             if (scope_state.frame.sequence) {
                 scope_state.boot.console_active = 0;
             }

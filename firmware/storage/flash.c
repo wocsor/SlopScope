@@ -7,6 +7,7 @@ extern void scope_boot_cursor_poll(void);
 static unsigned flash_initialized, flash_jedec_id, sequence;
 static unsigned reading_boot_assets;
 extern void usb_poll(void);
+extern void usb_service(void);
 static uint32_t flash_timer_ticks(void) {
     return MMIO32(0x01c20c28u);
 }
@@ -79,6 +80,20 @@ int scope_flash_init(void) {
 }
 unsigned scope_flash_id(void) {
     return flash_jedec_id;
+}
+__attribute__((section(".storage_text"), noinline)) int
+scope_flash_unique_id(uint8_t unique_id[16]) {
+    uint8_t command[21] = {0x4b, 0, 0, 0, 0};
+    if (!scope_flash_init() || !flash_spi_transfer(command, sizeof(command))) {
+        return 0;
+    }
+    unsigned any_set = 0, any_clear = 0;
+    for (unsigned index = 0; index < 16; index++) {
+        unique_id[index] = command[5 + index];
+        any_set |= unique_id[index];
+        any_clear |= (uint8_t)~unique_id[index];
+    }
+    return any_set && any_clear;
 }
 void scope_flash_release(void) {
     if (MMIO32(0x01c20060u) & (1u << 20)) {
@@ -175,13 +190,18 @@ _Static_assert(sizeof(struct settings_journal_record) <= 4096,
                "Settings record exceeds one erase sector");
 static struct settings_journal_record settings_slots[2], pending_settings_record;
 static unsigned settings_slot_valid[2];
+static unsigned settings_write_blocked;
+static unsigned legacy_settings_loaded;
+static unsigned settings_latest_slot(void);
+static int settings_slot_writable(uint32_t address, unsigned allow_zero_padding);
+static int settings_application_tail_available(void);
 static uint32_t settings_record_crc(const struct settings_journal_record *journal_record) {
     uint32_t crc = crc32_accumulate(0xffffffffu, journal_record, 16);
     return ~crc32_accumulate(crc, &journal_record->payload, journal_record->length);
 }
-static int settings_read_slots(void) {
+static int settings_read_slots(uint32_t base_address) {
     for (unsigned i = 0; i < 2; i++) {
-        if (!scope_flash_read(i ? SCOPE_SETTINGS_SLOT1 : SCOPE_SETTINGS_SLOT0,
+        if (!scope_flash_read(base_address + i * 4096,
                               &settings_slots[i],
                               sizeof(struct settings_journal_record))) {
             return 0;
@@ -198,13 +218,28 @@ static int settings_read_slots(void) {
         unsigned has_baseline_v6 =
             journal_record->version == 6 &&
             journal_record->length == offsetof(struct scope_saved_settings, voltage_baseline);
-        unsigned current = (journal_record->version == 7 || journal_record->version == 8) &&
-                           journal_record->length == sizeof(journal_record->payload);
+        unsigned has_brightness_v10 = journal_record->version == 10 &&
+                                      journal_record->length == sizeof(journal_record->payload);
+        unsigned has_theme_v9 =
+            (journal_record->version == 9 &&
+             journal_record->length == offsetof(struct scope_saved_settings, brightness_percent)) ||
+            has_brightness_v10;
+        unsigned current =
+            ((journal_record->version == 7 || journal_record->version == 8) &&
+             journal_record->length == offsetof(struct scope_saved_settings, light_mode)) ||
+            has_theme_v9;
         settings_slot_valid[i] =
             journal_record->magic == SETTINGS_RECORD_MAGIC &&
             (legacy || has_features_v4 || has_adc_gain_v5 || has_baseline_v6 || current) &&
             journal_record->commit == SETTINGS_COMMIT_MARKER &&
             journal_record->crc == settings_record_crc(journal_record);
+        if (settings_slot_valid[i] &&
+            (!has_brightness_v10 || !journal_record->payload.brightness_percent)) {
+            journal_record->payload.brightness_percent = 100;
+        }
+        if (settings_slot_valid[i] && !has_theme_v9) {
+            journal_record->payload.light_mode = 0;
+        }
         if (settings_slot_valid[i] && legacy) {
             scope_advanced_defaults(&journal_record->payload.advanced);
             scope_acquisition_defaults(&journal_record->payload.acquisition);
@@ -222,7 +257,15 @@ static int settings_read_slots(void) {
             settings_slot_valid[i] = scope_saved_settings_valid(&journal_record->payload);
         }
     }
+    if (base_address == SCOPE_SETTINGS_SLOT0) {
+        unsigned padding_available = settings_application_tail_available();
+        settings_write_blocked = !settings_slot_writable(SCOPE_SETTINGS_SLOT0, padding_available) ||
+                                 !settings_slot_writable(SCOPE_SETTINGS_SLOT1, padding_available);
+    }
     return 1;
+}
+unsigned scope_settings_write_blocked(void) {
+    return settings_write_blocked;
 }
 static unsigned settings_latest_slot(void) {
     return settings_slot_valid[1] &&
@@ -231,18 +274,33 @@ static unsigned settings_latest_slot(void) {
                ? 1
                : 0;
 }
-int scope_settings_load(struct scope_saved_settings *settings_result) {
-    if (!settings_read_slots()) {
+unsigned scope_settings_need_migration(void) {
+    return legacy_settings_loaded;
+}
+__attribute__((section(".storage_text"), noinline)) int
+scope_settings_load(struct scope_saved_settings *settings_result) {
+    if (!settings_read_slots(SCOPE_SETTINGS_SLOT0)) {
         return -1;
     }
+    legacy_settings_loaded = 0;
     if (!settings_slot_valid[0] && !settings_slot_valid[1]) {
-        return 0;
+        unsigned new_journal_blocked = settings_write_blocked;
+        int legacy_read = settings_read_slots(SCOPE_LEGACY_SETTINGS_SLOT0);
+        settings_write_blocked = new_journal_blocked;
+        if (!legacy_read) {
+            return -1;
+        }
+        if (!settings_slot_valid[0] && !settings_slot_valid[1]) {
+            return 0;
+        }
+        legacy_settings_loaded = 1;
     }
     unsigned slot_index = settings_latest_slot();
     *settings_result = settings_slots[slot_index].payload;
     sequence = settings_slots[slot_index].sequence;
     return 1;
 }
+
 unsigned scope_settings_sequence(void) {
     return sequence;
 }
@@ -264,6 +322,7 @@ static int flash_wait_ready(unsigned duration_ms) {
         if (!(status_register & 1)) {
             return 1;
         }
+        usb_service();
     } while (!flash_timeout_elapsed(start, duration_ms));
     return 0;
 }
@@ -297,7 +356,23 @@ static int flash_program_bytes(uint32_t address, const void *source, unsigned re
     }
     return 1;
 }
-static int settings_slot_owned_or_erased(uint32_t address) {
+static int settings_application_tail_available(void) {
+    uint32_t header[7];
+    static const uint8_t container_tag[] = "OLWIOLNLCINP1U2T";
+    if (!scope_flash_read(0x349000u, header, sizeof(header)) || header[0] < sizeof(header) ||
+        header[0] > SCOPE_SETTINGS_SLOT0 - 0x349000u || header[1] != 0xc0043048u) {
+        return 0;
+    }
+    const uint8_t *tag = (const uint8_t *)header + 8;
+    for (unsigned i = 0; i < sizeof(container_tag) - 1; i++) {
+        if (tag[i] != container_tag[i]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int settings_slot_writable(uint32_t address, unsigned allow_zero_padding) {
     uint8_t data[60];
     uint32_t magic;
     if (!scope_flash_read(address, &magic, 4)) {
@@ -306,16 +381,20 @@ static int settings_slot_owned_or_erased(uint32_t address) {
     if (magic == SETTINGS_RECORD_MAGIC) {
         return 1;
     }
+    unsigned padding = magic == 0 && allow_zero_padding;
+    if (magic != 0xffffffffu && !padding) {
+        return 0;
+    }
     for (unsigned byte_offset = 0; byte_offset < 4096;) {
         unsigned chunk_bytes = 4096 - byte_offset;
-        if (chunk_bytes > 60) {
-            chunk_bytes = 60;
+        if (chunk_bytes > sizeof(data)) {
+            chunk_bytes = sizeof(data);
         }
         if (!scope_flash_read(address + byte_offset, data, chunk_bytes)) {
             return 0;
         }
         for (unsigned i = 0; i < chunk_bytes; i++) {
-            if (data[i] != 0xff) {
+            if (data[i] != (padding ? 0 : 0xff)) {
                 return 0;
             }
         }
@@ -323,12 +402,14 @@ static int settings_slot_owned_or_erased(uint32_t address) {
     }
     return 1;
 }
-int scope_settings_save(const struct scope_saved_settings *settings_to_save) {
-    if (SCOPE_VOLATILE_SETTINGS) {
+
+__attribute__((section(".storage_text"), noinline)) int
+scope_settings_save(const struct scope_saved_settings *settings_to_save) {
+    if (SCOPE_VOLATILE_SETTINGS || settings_write_blocked) {
         (void)settings_to_save;
         return 0;
     }
-    if (!settings_read_slots()) {
+    if (!settings_read_slots(SCOPE_SETTINGS_SLOT0)) {
         return 0;
     }
     unsigned newest = settings_latest_slot(),
@@ -343,21 +424,23 @@ int scope_settings_save(const struct scope_saved_settings *settings_to_save) {
                 break;
             }
         }
-        if (payload_matches && settings_slots[newest].version == 8) {
+        if (payload_matches && settings_slots[newest].version == 10) {
             sequence = settings_slots[newest].sequence;
+            legacy_settings_loaded = 0;
             return 1;
         }
     }
     uint32_t address = target ? SCOPE_SETTINGS_SLOT1 : SCOPE_SETTINGS_SLOT0;
-    if (!settings_slot_owned_or_erased(address)) {
+    if (!settings_slot_writable(address, settings_application_tail_available())) {
+        settings_write_blocked = 1;
         return 0;
     }
     pending_settings_record.magic = SETTINGS_RECORD_MAGIC;
-    pending_settings_record.version = 8;
+    pending_settings_record.version = 10;
     pending_settings_record.length = sizeof(pending_settings_record.payload);
     pending_settings_record.sequence = (settings_slot_valid[0] || settings_slot_valid[1])
                                            ? settings_slots[newest].sequence + 1
-                                           : 1;
+                                           : sequence + 1;
     pending_settings_record.payload = *settings_to_save;
     pending_settings_record.commit = 0xffffffffu;
     pending_settings_record.crc = settings_record_crc(&pending_settings_record);
@@ -380,9 +463,10 @@ int scope_settings_save(const struct scope_saved_settings *settings_to_save) {
     uint32_t commit = SETTINGS_COMMIT_MARKER;
     if (!flash_program_bytes(
             address + offsetof(struct settings_journal_record, commit), &commit, 4) ||
-        !settings_read_slots() || !settings_slot_valid[target]) {
+        !settings_read_slots(SCOPE_SETTINGS_SLOT0) || !settings_slot_valid[target]) {
         return 0;
     }
     sequence = pending_settings_record.sequence;
+    legacy_settings_loaded = 0;
     return 1;
 }

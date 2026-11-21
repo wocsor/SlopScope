@@ -1,12 +1,73 @@
+#include "front_panel.h"
+#include "panel_tools.h"
 #include "scope_internal.h"
+#include "screenshot.h"
+
+static unsigned control_revision;
+
+void scope_controls_changed(void) {
+    control_revision++;
+    scope_state.display.display_redraw_requested = 1;
+}
 
 static unsigned scope_command_dispatch(const uint8_t *command, unsigned length, uint8_t *reply);
 
 static unsigned scope_command_dispatch(const uint8_t *command, unsigned length, uint8_t *reply) {
+    unsigned screenshot_reply_length = screenshot_command(command, length, reply);
+    if (screenshot_reply_length) {
+        return screenshot_reply_length;
+    }
+    unsigned tools_reply_length = panel_tools_command(command, length, reply);
+    if (tools_reply_length) {
+        return tools_reply_length;
+    }
+    unsigned panel_reply_length = front_panel_command(command, length, reply);
+    if (panel_reply_length) {
+        return panel_reply_length;
+    }
+    unsigned autoset_reply_length = panel_autoset_command(command, length, reply);
+    if (autoset_reply_length) {
+        return autoset_reply_length;
+    }
+    if (command_equals(command, length, "UI REVISION")) {
+        unsigned values[] = {control_revision,
+                             scope_settings_sequence(),
+                             scope_state.settings.restore_state,
+                             scope_state.settings.dirty,
+                             scope_state.settings.save_error,
+                             panel_autoset_state()};
+        const char *names[] = {
+            "UI controls=", " saved=", " restore=", " dirty=", " save_error=", " autoset="};
+        unsigned reply_length = 0;
+        for (unsigned index = 0; index < sizeof(values) / sizeof(values[0]); index++) {
+            reply_length += reply_write_text(reply + reply_length, names[index]);
+            reply_length += reply_write_hex32(reply + reply_length, values[index]);
+        }
+        reply[reply_length++] = '\n';
+        return reply_length;
+    }
+    if (command_equals(command, length, "CPU STATUS")) {
+        unsigned control;
+        __asm__ volatile("mrc p15, 0, %0, c1, c0, 0" : "=r"(control));
+        unsigned reply_length = reply_write_text(reply, "CPU control=");
+        reply_length += reply_write_hex32(reply + reply_length, control);
+        reply_length += reply_write_text(reply + reply_length, " clock=");
+        reply_length += reply_write_hex32(reply + reply_length, MMIO32(0x01c20050u));
+        reply_length += reply_write_text(reply + reply_length, " pll=");
+        reply_length += reply_write_hex32(reply + reply_length, MMIO32(0x01c20000u));
+        reply[reply_length++] = '\n';
+        return reply_length;
+    }
     if (command_equals(command, length, "CAPABILITIES")) {
         unsigned reply_length = reply_write_text(reply, "CAPS frame=");
         reply_length += reply_write_hex32(reply + reply_length, 7);
         reply_length += reply_write_text(reply + reply_length, " frame_chunks=");
+        reply_length += reply_write_hex32(reply + reply_length, 1);
+        reply_length += reply_write_text(reply + reply_length, " panel=");
+        reply_length += reply_write_hex32(reply + reply_length, 2);
+        reply_length += reply_write_text(reply + reply_length, " autoset=");
+        reply_length += reply_write_hex32(reply + reply_length, 1);
+        reply_length += reply_write_text(reply + reply_length, " screenshot=");
         reply_length += reply_write_hex32(reply + reply_length, 1);
         reply_length += reply_write_text(reply + reply_length, " record=");
         reply_length += reply_write_hex32(reply + reply_length, 4);
@@ -351,9 +412,12 @@ static unsigned scope_command_dispatch(const uint8_t *command, unsigned length, 
 
 unsigned scope_command(const uint8_t *command, unsigned command_length, uint8_t *reply) {
     unsigned reply_length = scope_command_dispatch(command, command_length, reply);
-    if (scope_state.boot.stage == BOOT_ACQUIRING && !scope_state.settings.save_held &&
-        reply_length >= 3 && reply[0] == 'O' && reply[1] == 'K' && reply[2] == ' ') {
+    if (scope_state.boot.stage == BOOT_ACQUIRING && reply_length >= 3 && reply[0] == 'O' &&
+        reply[1] == 'K' && reply[2] == ' ') {
         unsigned persistent =
+            (command_length > 19 && command_equals(command, 19, "DISPLAY BRIGHTNESS ")) ||
+            command_equals(command, command_length, "DISPLAY THEME LIGHT") ||
+            command_equals(command, command_length, "DISPLAY THEME DARK") ||
             (command_length > 17 && command_equals(command, 17, "VOLTAGE BASELINE ")) ||
             (command_length > 8 && command_equals(command, 8, "ACQUIRE ")) ||
             (command_length > 11 && command_equals(command, 11, "HORIZONTAL ")) ||
@@ -367,6 +431,9 @@ unsigned scope_command(const uint8_t *command, unsigned command_length, uint8_t 
             command_equals(command, command_length, "LIVE OFF") ||
             command_equals(command, command_length, "LIVE RUN");
         if (persistent) {
+            scope_controls_changed();
+        }
+        if (persistent && !scope_state.settings.save_held) {
             scope_state.configuration.average_epoch++;
             scope_state.settings.dirty = 1;
             scope_state.settings.changed = timer_milliseconds();

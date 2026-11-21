@@ -19,6 +19,7 @@ void analog_poll(void) {
                                                       : 1;
     if (scope_state.analog.step_index == total) {
         scope_state.analog.state = SETUP_COMPLETE;
+        scope_controls_changed();
         scope_state.analog.configured = 1;
         scope_state.display.display_redraw_requested = 1;
         if (!scope_state.analog.job_kind) {
@@ -119,12 +120,15 @@ void analog_poll(void) {
             scope_state.analog.configured = scope_state.capture.live_enabled = 0;
             return;
         }
-        /* Allow mechanical analog switching to settle without blocking USB. */
+        unsigned relay_write = event[1] == 0x4f0 || event[1] == 0xb4 || event[1] == 0xb8;
+        unsigned electronic_write =
+            event[1] == 0xc4 || event[1] == 0xc8 || event[1] == 0x4e8 || event[1] == 0x4ec;
+        /* Keep boot settling; interactive controls allow 20 ms for relays, 1 ms for DAC/filter. */
         scope_state.analog.wait_ticks =
-            (event[1] == 0x4f0 || event[1] == 0xc4 || event[1] == 0xc8 || event[1] == 0xb4 ||
-             event[1] == 0xb8 || event[1] == 0x4e8 || event[1] == 0x4ec)
-                ? 250u * 24000u
-                : 2400u;
+            !scope_state.analog.job_kind && (relay_write || electronic_write) ? 250u * 24000u
+            : relay_write                                                     ? 20u * 24000u
+            : electronic_write                                                ? 24000u
+                                                                              : 2400u;
     }
     analog_step_started_ticks = timer_ticks();
 }

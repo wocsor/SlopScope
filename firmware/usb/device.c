@@ -1,6 +1,7 @@
 #include "board.h"
 #include "diagnostics.h"
 #include "scope.h"
+#include "storage.h"
 /* F1C200s MUSB device driver, polled PIO, full/high-speed bulk */
 #include "protocol.h"
 #include <stddef.h>
@@ -59,6 +60,7 @@ static unsigned clear_in_count, clear_out_count, poll_previous, poll_gap_max;
 static unsigned poll_window_start, poll_window_max, poll_previous_window_max, poll_slow_count;
 static unsigned suspend_count, resume_count, disconnect_count;
 static unsigned usb_poll_active;
+static char usb_serial_number[36] = "UNAVAILABLE";
 static unsigned session_requested, session_confirmed;
 static unsigned transmit_activity_seen, receive_activity_seen, transmit_packet_pending;
 static uint32_t session_reply_ticks, transmit_activity_ticks, receive_activity_ticks;
@@ -136,7 +138,7 @@ unsigned usb_descriptor(unsigned type, unsigned index, uint8_t *destination) {
         }
         const char *descriptor_text = index == 1   ? "WOCSOR"
                                       : index == 2 ? "DOS1102 bulk control"
-                                      : index == 3 ? "DEV0001"
+                                      : index == 3 ? usb_serial_number
                                                    : 0;
         if (!descriptor_text) {
             return 0;
@@ -853,6 +855,18 @@ void usb_main(void) {
     }
     usb_timer_initialize();
     scope_initialize();
+    uint8_t flash_unique_id[16];
+    if (scope_flash_unique_id(flash_unique_id)) {
+        const char digits[] = "0123456789ABCDEF";
+        usb_serial_number[0] = 'S';
+        usb_serial_number[1] = 'S';
+        usb_serial_number[2] = '-';
+        for (unsigned index = 0; index < 16; index++) {
+            usb_serial_number[3 + index * 2] = digits[flash_unique_id[index] >> 4];
+            usb_serial_number[4 + index * 2] = digits[flash_unique_id[index] & 15];
+        }
+        usb_serial_number[35] = 0;
+    }
 #if USB_DIAGNOSTICS
     diagnostics_initialize();
 #endif
@@ -862,7 +876,21 @@ void usb_main(void) {
         MMIO32(0x01c20c20u) = 0;
         return;
     }
+    unsigned previous_watchdog_config = MMIO32(0x01c20cb4u);
+    unsigned previous_watchdog_mode = MMIO32(0x01c20cb8u);
+    MMIO32(0x01c20cb4u) = (previous_watchdog_config & ~3u) | 1u;
+    MMIO32(0x01c20cb8u) = 0x21u;
+    MMIO32(0x01c20cb0u) = 0x14afu;
+    unsigned cached_control = sctlr | (1u << 12);
+    /* Match BOOT1's control write/branch; keep MMU and data cache disabled. */
+    __asm__ volatile("mcr p15, 0, %0, c7, c7, 0\n"
+                     "mcr p15, 0, %1, c1, c0, 0\n"
+                     "b 1f\n1:" ::"r"(0),
+                     "r"(cached_control)
+                     : "memory");
     usb_init();
+    MMIO32(0x01c20cb8u) = previous_watchdog_mode;
+    MMIO32(0x01c20cb4u) = previous_watchdog_config;
     uint32_t start = usb_timer_ticks();
     unsigned ever_configured = 0;
     unsigned autonomous = MMIO32(0x800a010cu) == 0x4155544fu;

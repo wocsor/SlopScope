@@ -42,6 +42,7 @@ struct scope_fpga_state {
 };
 struct scope_display_state {
     unsigned int screen_on;
+    unsigned int light_mode;
     unsigned int activity_heartbeat;
     unsigned int view_start;
     unsigned int view_points;
@@ -54,6 +55,8 @@ struct scope_display_state {
     unsigned int buffer_ready[2];
     volatile uint16_t *draw_framebuffer;
     uint32_t display_last_ticks;
+    uint32_t render_stage_ticks[7];
+    unsigned full_redraws;
 };
 struct scope_boot_state {
     unsigned int console_active;

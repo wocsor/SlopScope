@@ -51,6 +51,14 @@ _start:
  .global enter_brom_fel
 .type enter_brom_fel,%function
 enter_brom_fel:
+    /* Restore uncached ROM execution before FEL accepts new SRAM code. */
+    mov r0, #0
+    mrc p15, 0, r1, c1, c0, 0
+    bic r1, r1, #0x1000
+    mcr p15, 0, r1, c1, c0, 0
+    mcr p15, 0, r0, c7, c7, 0
+    b 4f
+4:
     /* BOOT0 clears V; ROM FEL enables IRQs using vectors at ffff0000. */
     mrc p15, 0, r1, c1, c0, 0
     orr r1, r1, #0x2000

@@ -12,7 +12,14 @@ import subprocess
 import time
 from pathlib import Path
 
-from flash_layout import APPLICATION_END, APPLICATION_START, JOURNAL_START, SECTOR_BYTES
+from flash_layout import (
+    APPLICATION_END,
+    APPLICATION_START,
+    JOURNAL_BYTES,
+    JOURNAL_START,
+    LEGACY_JOURNAL_START,
+    SECTOR_BYTES,
+)
 from toolchain import fel as find_fel
 from unit_state import IDENTITY_BYTES, IDENTITY_START, load_unit, sha256
 
@@ -24,6 +31,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--write", action="store_true")
     parser.add_argument("--from-runtime", action="store_true")
+    parser.add_argument("--serial", help="Runtime USB serial; required with multiple scopes")
     parser.add_argument("--restart", action="store_true")
     args = parser.parse_args()
     plan = json.loads((OUT / "install_plan.json").read_text())
@@ -62,7 +70,7 @@ def main():
     if args.from_runtime:
         from device import ScopeControl
 
-        with ScopeControl() as control:
+        with ScopeControl(serial_number=args.serial) as control:
             print(control.request("REBOOT FEL"), flush=True)
         deadline = time.monotonic() + 8
         while subprocess.run([loader, "ver"], capture_output=True, check=False).returncode:
@@ -88,9 +96,10 @@ def main():
     identity = read_region(IDENTITY_START, IDENTITY_BYTES, "identity-check.bin")
     if sha256(identity) != plan["identity_sha256"]:
         raise RuntimeError("Connected unit does not match retained identity; no sectors written")
-    journal = read_region(JOURNAL_START, 8192, "settings-before.bin")
+    journal = read_region(JOURNAL_START, JOURNAL_BYTES, "settings-before.bin")
+    legacy_journal = read_region(LEGACY_JOURNAL_START, JOURNAL_BYTES, "legacy-settings-before.bin")
     changes = []
-    read_bytes = IDENTITY_BYTES + 8192
+    read_bytes = IDENTITY_BYTES + 2 * JOURNAL_BYTES
     for start, end, payload in payloads:
         current = read_region(start, end - start, f"before-{start:06x}.bin")
         read_bytes += len(current)
@@ -118,8 +127,10 @@ def main():
                 f"Readback mismatch at {start:#x}; stay in FEL and use the saved region backup"
             )
         print("Readback matched", flush=True)
-    if read_region(JOURNAL_START, 8192, "settings-after.bin") != journal:
+    if read_region(JOURNAL_START, JOURNAL_BYTES, "settings-after.bin") != journal:
         raise RuntimeError("Settings journal changed unexpectedly")
+    if read_region(LEGACY_JOURNAL_START, JOURNAL_BYTES, "legacy-settings-after.bin") != legacy_journal:
+        raise RuntimeError("Legacy filesystem/settings sectors changed unexpectedly")
     result = {
         "app_sha256": plan["app_sha256"],
         "runs": ranges,

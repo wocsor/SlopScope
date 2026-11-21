@@ -72,6 +72,7 @@ void capture_start(void) {
     if (scope_state.capture.pending_rate_index) {
         scope_state.capture.rate_index = scope_state.capture.pending_rate_index;
         scope_state.capture.pending_rate_index = 0;
+        scope_controls_changed();
     }
     if (!scope_state.pulse.candidates || pulse_epoch != scope_state.capture.capture_average_epoch) {
         pulse_epoch = scope_state.capture.capture_average_epoch;
@@ -81,8 +82,7 @@ void capture_start(void) {
         scope_state.capture.normal_mode && !scope_state.record.active &&
         scope_state.capture.rate_index >= 16 && scope_state.trigger.active_config.sweep != 2 &&
         scope_state.capture.roll_live &&
-        !scope_state.configuration.active_features.trigger_family &&
-        !scope_state.configuration.active_acquisition.horizontal_enabled;
+        !scope_state.configuration.active_features.trigger_family;
     if (!scope_state.capture.capture_roll) {
         scope_state.capture.roll_configured = 0;
         scope_state.capture.roll_filling = 0;
@@ -245,16 +245,25 @@ static void capture_poll_configuration(void) {
         }
     }
     if (scope_state.record.active ||
-        scope_state.configuration.active_acquisition.horizontal_enabled) {
+        (scope_state.configuration.active_acquisition.horizontal_enabled &&
+         !scope_state.capture.capture_roll)) {
         struct scope_acquisition_geometry geometry;
-        if (!scope_acquisition_geometry_ratio(
+        int32_t offset_ns = scope_state.configuration.active_acquisition.horizontal_enabled
+                                ? scope_state.configuration.active_acquisition.horizontal_ns
+                                : 0;
+        int geometry_valid;
+        if (scope_state.record.active) {
+            geometry_valid = scope_acquisition_geometry_ratio(
                 sample_rate_numerator(scope_state.capture.rate_index),
                 sample_rate_denominator(scope_state.capture.rate_index),
-                scope_state.record.active ? scope_state.record.depth : 10000,
-                scope_state.configuration.active_acquisition.horizontal_enabled
-                    ? scope_state.configuration.active_acquisition.horizontal_ns
-                    : 0,
-                &geometry)) {
+                scope_state.record.depth,
+                offset_ns,
+                &geometry);
+        } else {
+            geometry_valid = scope_live_acquisition_geometry(
+                scope_state.capture.rate_index, offset_ns, &geometry);
+        }
+        if (!geometry_valid) {
             capture_fail(5);
             return;
         }
@@ -265,6 +274,13 @@ static void capture_poll_configuration(void) {
             fpga_write_register(0x11c, geometry.compensation)) {
             capture_fail(1);
             return;
+        }
+        /* Geometry overrides must be latched after the stock plan's apply strobes. */
+        for (unsigned apply = 0; apply < 5; apply++) {
+            if (fpga_write_register(CAP_APPLY_CLOCK, 1)) {
+                capture_fail(1);
+                return;
+            }
         }
     }
     if (fpga_write_register(0x4fc, 0)) {

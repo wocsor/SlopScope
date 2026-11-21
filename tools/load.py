@@ -68,9 +68,9 @@ def main():
     data = image.read_bytes()
     if len(data) != manifest["size"] or hashlib.sha256(data).hexdigest() != manifest["sha256"]:
         raise RuntimeError("Application differs from its build manifest")
-    if manifest["entry"] != 0x80080000 or len(data) > 0x40000:
+    if manifest["entry"] != 0x80080000 or len(data) > 0x50000:
         raise RuntimeError("Unsupported application load range")
-    if not 0x800C0000 <= manifest["bss_start"] <= manifest["bss_end"] <= 0x800E0000:
+    if not 0x800D0000 <= manifest["bss_start"] <= manifest["bss_end"] <= 0x80100000:
         raise RuntimeError("Unsupported BSS range")
     print(wait_for_fel(), flush=True)
     stop_display_dma()

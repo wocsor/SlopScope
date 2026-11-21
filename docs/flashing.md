@@ -1,46 +1,54 @@
-# Flashing SlopScope
+# Installing SlopScope
 
-Download and extract a release. It contains two installation files:
+## Which file do I need?
 
-| File | Use |
+A release has two installation files. Pick the one for your update route:
+
+| File | What it's for |
 | --- | --- |
-| `Scope.update` | Install from the stock firmware's USB-drive updater |
-| `SlopScope-fel.bin` | Flash the application through FEL, including updates from SlopScope |
+| `Scope.update` | Installing through the stock firmware's USB-drive updater |
+| `SlopScope-fel.bin` | Writing the application through FEL, including updates from SlopScope |
 
-Keep your original recovery backup private. Check the downloaded files from the
-extracted release directory:
+The supported target is the HANMATEK DOS1102. `Scope.update` accepts stock V4.0.0;
+other model names and stock versions haven't been qualified.
+
+Download your installer and `SHA256SUMS` from the same release. For example:
 
 ```sh
-shasum -a 256 -c SHA256SUMS
+shasum -a 256 Scope.update
 ```
 
-The target is DOS1102 hardware. The update package explicitly accepts stock
-V4.0.0; other model names and versions are not qualified.
+Compare that hash with the `Scope.update` entry in `SHA256SUMS`. Use
+`SlopScope-fel.bin` instead if you're installing through FEL. Actions artifacts
+come as a ZIP; after extracting the full bundle, you can check everything with
+`shasum -a 256 -c SHA256SUMS`.
 
-## From stock firmware
+Keep your original recovery backup somewhere safe and private. You don't need to
+make another full-flash dump for every SlopScope update.
+
+## If you're still on stock
 
 1. Copy `Scope.update` to the root of a FAT32 USB flash drive. Keep that exact filename.
-2. Eject it from the PC, disconnect the scope's PC USB data cable, and insert
-   the drive into the scope's USB-A host port.
-3. Open the stock Utility menu's firmware-update option and follow its prompts.
-4. Wait for the updater to report completion, then power-cycle the scope.
+2. Eject the drive from the PC. Disconnect the scope's PC USB data cable, then put
+   the drive in the scope's USB-A port.
+3. Open the firmware-update option in the stock Utility menu and follow the prompts.
+4. Wait for it to finish, then power-cycle the scope.
 
-A successful stock-updater installation has been reported on a second scope.
-Stock V4 switches its shared USB controller between host and PC-device roles;
-it does not read the drive while maintaining a PC USB connection.
-The stock updater also updates its identity/version record as part of its normal
-procedure. It retains the FPGA, factory filesystem and SlopScope settings journal.
+This route has worked on the other scope. The package installs the SlopScope
+application; the stock updater also updates its identity/version record as part
+of its normal procedure. The FPGA and factory filesystem stay in place.
 
-## From SlopScope, or through FEL
+## If you're on SlopScope, or want to use FEL
 
-SlopScope currently uses FEL for firmware updates; it does not implement a USB
-host or its own USB-drive updater.
+SlopScope updates currently go through FEL. It doesn't have its own USB-drive updater.
+The host/device role details are in
+[the USB host/device notes](status.md#what-about-the-two-usb-ports).
 
-1. Send `REBOOT FEL` over the [USB interface](protocol.md), consume the reply and
-   close the client. If software reboot is unavailable, enter FEL through the
-   board's recovery procedure instead.
+1. Send `REBOOT FEL` through the [USB interface](https://github.com/wocsor/SlopScope/blob/HEAD/docs/protocol.md), read the reply, and
+   close the USB client. If that isn't available, use the board's hardware recovery
+   procedure to enter FEL.
 2. Install `sunxi-fel` from [sunxi-tools](https://github.com/linux-sunxi/sunxi-tools).
-3. From the extracted release directory, run:
+3. Connect one scope at a time. From the directory containing your downloaded installer, run:
 
 ```sh
 sunxi-fel ver
@@ -50,19 +58,38 @@ sunxi-fel spiflash-read 0x349000 "$(wc -c < SlopScope-fel.bin)" SlopScope-readba
 cmp SlopScope-fel.bin SlopScope-readback.bin
 ```
 
-`sunxi-fel ver` must identify the device before writing. If `cmp` succeeds with
-no output, power-cycle normally. If comparison fails, keep the scope in FEL and
-resolve the mismatch before rebooting.
+`sunxi-fel ver` needs to identify the device before you write anything. `cmp`
+returns no output when the readback matches. Once it matches, power-cycle normally.
+If it doesn't match, keep the scope in FEL and resolve that before rebooting.
 
-`SlopScope-fel.bin` is an application container for **offset `0x349000`**, not a
-full-flash image. This method changes application sectors only, preserving
-bootloaders, logo, FPGA, identity, factory records and saved settings. It can also
-be used from stock once the device is in FEL. Keep your existing recovery backup;
-a new full-flash dump is not required for each update.
+`SlopScope-fel.bin` is an application container written at **`0x349000`**, not a
+full-flash image. This route writes the application sectors and leaves the
+bootloaders, logo, FPGA, identity, factory records and saved settings in place.
+You can also use it from stock once the scope is in FEL.
 
-## After installation
+## What happens to settings and calibration?
 
-The scope should reach its grid and traces, restore saved settings and enumerate
-as USB `DEAF:BABE`. A brief Hanmatek logo before SlopScope is expected because the
-original bootloader and its logo are retained. No recalibration is required just
-to install or update SlopScope.
+SlopScope reads the factory calibration records already in your scope. You don't
+need to recalibrate just because you've installed or updated it. That isn't an
+accuracy certification; the [status doc](status.md#what-still-needs-checking)
+explains the remaining calibration limits.
+
+Saved settings use two 4 KiB sectors at `0x517000` and `0x518000`. Release payloads
+end before `0x517000`. The repository's guarded FEL installer also checks that the
+settings sectors stay intact; the manual commands above verify the application readback.
+
+The first settings save only initializes erased space or verified unused zero
+padding beyond the installed application. Unknown content is protected. Older
+SlopScope settings can be read from their legacy location and migrated without
+changing the stock filesystem.
+
+Export a setup before restoring stock or installing unrelated firmware. Those
+images don't have to reserve SlopScope's settings space.
+
+## What should I see afterward?
+
+The scope should reach the grid and traces, restore saved scope settings, and show
+up on USB as `DEAF:BABE`. You may still see a brief Hanmatek logo at the start,
+since these files leave the existing bootloader and logo in place. See
+[status](status.md) for session-only
+cursor/Math settings and the current limitations.

@@ -85,6 +85,7 @@ def build(backup=None):
         [
             toolchain.linker(),
             "--fatal-warnings",
+            "--gc-sections",
             "-T",
             str(HERE / "memory.ld"),
             "-Map=" + str(OUT / "bringup.map"),

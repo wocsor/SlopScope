@@ -10,7 +10,7 @@ import struct
 import subprocess
 from pathlib import Path
 
-from flash_layout import APPLICATION_END, APPLICATION_START, SECTOR_BYTES
+from flash_layout import APPLICATION_END, APPLICATION_START, JOURNAL_BYTES, JOURNAL_START, SECTOR_BYTES
 
 ROOT = Path(__file__).resolve().parents[1]
 ENCODING_KEY = b"llp_owon"
@@ -93,6 +93,9 @@ def package_application(image_dir, output, version):
         "application_bytes": len(application),
         "container_bytes": len(container),
         "application_flash_offset": APPLICATION_START,
+        "application_flash_slot_end": APPLICATION_END,
+        "settings_flash_offset": JOURNAL_START,
+        "settings_flash_bytes": JOURNAL_BYTES,
         "application_flash_bytes": len(payload),
         "fel_image_file": "SlopScope-fel.bin",
         "fel_image_sha256": hashlib.sha256(payload).hexdigest(),

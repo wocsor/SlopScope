@@ -89,18 +89,19 @@ notices.
 
 | Dependency | Use | Upstream license/reference |
 | --- | --- | --- |
-| NumPy | Artwork processing | [BSD-3-Clause](https://github.com/numpy/numpy/blob/main/LICENSE.txt); wheels also carry component licenses |
+| NumPy | Artwork processing and host waveform analysis/FFT | [BSD-3-Clause](https://github.com/numpy/numpy/blob/main/LICENSE.txt); wheels also carry component licenses |
 | Pillow / PIL | Artwork processing | [MIT-CMU](https://github.com/python-pillow/Pillow/blob/main/LICENSE) |
 | pyelftools | Read ELF build outputs | [Public-domain dedication / Unlicense](https://github.com/eliben/pyelftools/blob/main/LICENSE); bundled Construct has separate terms |
-| PyUSB | Host maintenance and diagnostics | [BSD-3-Clause](https://github.com/pyusb/pyusb/blob/v1.3.1/LICENSE) |
+| PyUSB | SlopScope USB library, bridge, maintenance and diagnostics | [BSD-3-Clause](https://github.com/pyusb/pyusb/blob/v1.3.1/LICENSE) |
 | libusb | Host USB backend | [LGPL-2.1-or-later](https://github.com/libusb/libusb/blob/v1.0.30/COPYING) |
 | pySerial | Optional ESP32 console | [BSD-3-Clause](https://github.com/pyserial/pyserial/blob/v3.5/LICENSE.txt) |
 | Clang / LLVM / LLD | ARM compilation and linking | [Apache-2.0 with LLVM exceptions](https://github.com/llvm/llvm-project/blob/main/llvm/LICENSE.TXT) |
 | sunxi-tools / sunxi-fel | External FEL loader | [Upstream per-file notices](https://github.com/linux-sunxi/sunxi-tools); tool binary is not bundled |
 
-The optional development scripts also import the separately maintained `hscope`
-project. Its licensing and that of the separate web UI require their own audits.
-Neither project is copied into this repository.
+The first-party Python USB library and local bridge are included under `host/`
+and use this repository’s MIT license. The browser assets remain in the separate
+web UI project and are loaded at runtime, not bundled in the firmware or Python
+package. That project retains its own licensing and notices.
 
 ## Technical references and unresolved material
 

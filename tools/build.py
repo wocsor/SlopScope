@@ -98,6 +98,7 @@ def build(
     build_hud_font()
     defines = [
         "-DLFS_READONLY",
+        "-DSCOPE_BACKLIGHT_PWM=1",
         "-DLFS_NO_MALLOC",
         "-DLFS_NO_ASSERT",
         "-DLFS_NO_DEBUG",

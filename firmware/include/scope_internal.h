@@ -16,6 +16,30 @@
 #include <stddef.h>
 #include <stdint.h>
 
+static inline unsigned display_background_color(void) {
+    return scope_state.display.light_mode && !scope_state.boot.console_active ? 0xffff : 0;
+}
+
+static inline unsigned display_foreground_color(unsigned dark_mode_color) {
+    if (!display_background_color()) {
+        return dark_mode_color;
+    }
+    switch (dark_mode_color) {
+    case 0xffff:
+        return 0;
+    case 0xffe0:
+        return 0x9400;
+    case 0x07ff:
+        return 0x03ef;
+    case 0x07e0:
+        return 0x0400;
+    case 0x7bef:
+        return 0x4208;
+    default:
+        return dark_mode_color;
+    }
+}
+
 void spi1_select(void);
 void spi1_deselect(void);
 int spi1_initialize(void);
@@ -27,6 +51,7 @@ unsigned reply_write_text(uint8_t *reply, const char *text);
 unsigned reply_write_hex32(uint8_t *reply, uint32_t value);
 unsigned capture_alignment(void);
 void publish_frame(void);
+int frame_channel_matches_live_range(unsigned channel_index);
 const uint8_t *scope_snapshot_legacy(unsigned *length);
 const uint8_t *scope_snapshot_v2(unsigned *length);
 const uint8_t *scope_snapshot_v3(unsigned *length);
@@ -49,7 +74,16 @@ void video_control_normalize(struct scope_trigger *trigger_config,
 int trigger_program(void);
 unsigned hud_text(unsigned x, unsigned y, const char *text, unsigned color);
 unsigned hud_number(unsigned x, unsigned y, int value, unsigned color);
+unsigned hud_format_voltage(char *text, int64_t voltage_uv);
+unsigned hud_format_time(char *text, int64_t time_ns);
+unsigned hud_format_quantity(char *text, int64_t value_micro, const char *unit);
+unsigned hud_format_frequency(char *text, uint64_t frequency_millihz);
+unsigned display_grid_color_at(unsigned x, unsigned y);
+void display_fill_rectangle(
+    unsigned left, unsigned top, unsigned width, unsigned height, unsigned color);
+void display_draw_trace_segment(unsigned x, int start_y, int end_y, unsigned color, int erase);
 void display_annotations(void);
+void hud_draw_status(void);
 void hud_draw_usb_status(void);
 void hud_draw_measurements(void);
 void activity_poll(void);
@@ -58,6 +92,7 @@ void capture_start(void);
 int capture_busy(void);
 void live_poll(void);
 void display_poll(void);
+void scope_controls_changed(void);
 void capture_poll(void);
 void adc_poll(void);
 unsigned adc_command(const uint8_t *command, unsigned length, uint8_t *reply);
@@ -89,6 +124,8 @@ void display_present(uintptr_t framebuffer);
 int display_present_pending(void);
 void display_color_bars(uint16_t *framebuffer);
 void display_backlight(int enabled);
+unsigned display_brightness(void);
+void display_set_brightness(unsigned brightness_percent);
 int fpga_write_words(unsigned word_address, const void *data, int count);
 unsigned usb_high_speed(void);
 void usb_debug(unsigned *values);

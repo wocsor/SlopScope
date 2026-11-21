@@ -1,4 +1,7 @@
+#include "front_panel.h"
+#include "panel_tools.h"
 #include "scope_internal.h"
+#include "screenshot.h"
 
 static uint32_t activity_last_tick;
 static uint32_t display_started;
@@ -7,47 +10,106 @@ static unsigned plot_revision = 1;
 static unsigned rendered_overlay_revision[2];
 static unsigned rendered_plot_revision[2];
 static unsigned rendered_sequence[2];
+static unsigned rendered_light_mode[2];
 static int16_t plot_y[2][2][750];
 static int16_t voltage_y[2][256];
 static unsigned int voltage_keys[2][9];
 
-static unsigned display_grid_color_at(unsigned x, unsigned y);
-static void
-display_draw_trace_segment(unsigned x, int start_y, int end_y, unsigned color, int erase);
+unsigned display_grid_color_at(unsigned x, unsigned y);
+void display_draw_trace_segment(unsigned x, int start_y, int end_y, unsigned color, int erase);
 static void display_draw_waveforms(void);
 
-static unsigned display_grid_color_at(unsigned x, unsigned y) {
+unsigned display_grid_color_at(unsigned x, unsigned y) {
     if (x < DISPLAY_PLOT_LEFT || x > DISPLAY_PLOT_LEFT + DISPLAY_PLOT_WIDTH ||
         y < DISPLAY_PLOT_TOP || y > DISPLAY_PLOT_TOP + DISPLAY_PLOT_HEIGHT) {
-        return 0;
+        return display_background_color();
     }
     return (x == DISPLAY_PLOT_LEFT || x == DISPLAY_PLOT_LEFT + DISPLAY_PLOT_WIDTH ||
             (x - DISPLAY_PLOT_LEFT + 25) % 50 == 0 || (y - DISPLAY_PLOT_TOP) % 50 == 0)
-               ? 0x2104
-               : 0;
+               ? (scope_state.display.light_mode ? 0 : 0x2104)
+               : display_background_color();
 }
 
-static void
-display_draw_trace_segment(unsigned x, int start_y, int end_y, unsigned color, int erase) {
+void display_fill_rectangle(
+    unsigned left, unsigned top, unsigned width, unsigned height, unsigned color) {
     volatile uint16_t *framebuffer = scope_state.display.draw_framebuffer;
+    uint32_t paired_pixels = color | (color << 16);
+    for (unsigned row = 0; row < height; row++) {
+        volatile uint16_t *pixels = framebuffer + (top + row) * 800 + left;
+        unsigned remaining = width;
+        if ((left & 1) && remaining) {
+            *pixels++ = color;
+            remaining--;
+        }
+        volatile uint32_t *pairs = (volatile uint32_t *)pixels;
+        for (unsigned count = 0; count < remaining / 2; count++) {
+            *pairs++ = paired_pixels;
+        }
+        if (remaining & 1) {
+            *(volatile uint16_t *)pairs = color;
+        }
+        if (!(row & 7)) {
+            usb_service();
+        }
+    }
+}
+
+static void display_erase_trace_segment(unsigned x, int start_y, int end_y, unsigned width) {
+    unsigned background = width == 2 ? 0xffff : 0;
+    unsigned grid = width == 2 ? 0 : 0x2104;
+    for (unsigned column = x; column < x + width && column < DISPLAY_PLOT_LEFT + DISPLAY_PLOT_WIDTH;
+         column++) {
+        unsigned grid_column =
+            column == DISPLAY_PLOT_LEFT || (column - DISPLAY_PLOT_LEFT + 25) % 50 == 0;
+        unsigned grid_row_offset = (start_y - DISPLAY_PLOT_TOP) % 50;
+        volatile uint16_t *pixel = scope_state.display.draw_framebuffer + start_y * 800 + column;
+        for (int y = start_y; y <= end_y; y++) {
+            *pixel = grid_column || !grid_row_offset ? grid : background;
+            pixel += 800;
+            if (++grid_row_offset == 50) {
+                grid_row_offset = 0;
+            }
+        }
+    }
+}
+
+void display_draw_trace_segment(unsigned x, int start_y, int end_y, unsigned color, int erase) {
+    unsigned light = scope_state.display.light_mode;
+    unsigned stroke_width = light ? 2 : 1;
     if (start_y > end_y) {
         int swap_y = start_y;
         start_y = end_y;
         end_y = swap_y;
     }
+    end_y += (int)stroke_width - 1;
     if (start_y < DISPLAY_PLOT_TOP) {
         start_y = DISPLAY_PLOT_TOP;
     }
     if (end_y >= DISPLAY_PLOT_TOP + DISPLAY_PLOT_HEIGHT) {
         end_y = DISPLAY_PLOT_TOP + DISPLAY_PLOT_HEIGHT - 1;
     }
-    for (int y = start_y; y <= end_y; y++) {
-        unsigned previous_color = framebuffer[y * 800 + x];
-        framebuffer[y * 800 + x] = erase ? display_grid_color_at(x, y)
-                                   : ((previous_color == 0xffe0 && color == 0x07ff) ||
-                                      (previous_color == 0x07ff && color == 0xffe0))
-                                       ? 0xffff
-                                       : color;
+    if (start_y > end_y) {
+        return;
+    }
+    if (erase) {
+        display_erase_trace_segment(x, start_y, end_y, stroke_width);
+        return;
+    }
+    unsigned ch1_color = light ? 0x9400 : 0xffe0;
+    unsigned ch2_color = light ? 0x03ef : 0x07ff;
+    unsigned overlap_color = light ? 0 : 0xffff;
+    for (unsigned column = x;
+         column < x + stroke_width && column < DISPLAY_PLOT_LEFT + DISPLAY_PLOT_WIDTH;
+         column++) {
+        volatile uint16_t *pixel = scope_state.display.draw_framebuffer + start_y * 800 + column;
+        for (int y = start_y; y <= end_y; y++) {
+            unsigned previous_color = *pixel;
+            *pixel = ((previous_color == ch1_color && color == ch2_color) ||
+                      (previous_color == ch2_color && color == ch1_color))
+                         ? overlap_color
+                         : color;
+            pixel += 800;
+        }
     }
 }
 
@@ -55,8 +117,11 @@ static void display_draw_waveforms(void) {
     if (!scope_state.display.screen_on) {
         return;
     }
+    uint32_t stage_started = timer_ticks();
+    front_panel_display_prepare();
     volatile uint16_t *framebuffer = scope_state.display.draw_framebuffer;
     if (!scope_state.display.draw_buffer_valid) {
+        scope_state.display.full_redraws++;
         for (unsigned y = 0; y < 480; y++) {
             for (unsigned x = 0; x < 800; x++) {
                 framebuffer[y * 800 + x] = display_grid_color_at(x, y);
@@ -66,6 +131,10 @@ static void display_draw_waveforms(void) {
             }
         }
     }
+    panel_tools_erase();
+    uint32_t stage_finished = timer_ticks();
+    scope_state.display.render_stage_ticks[0] = stage_started - stage_finished;
+    stage_started = stage_finished;
     if (scope_state.display.draw_buffer_valid) {
         for (unsigned channel_index = 0; channel_index < 2; channel_index++) {
             for (unsigned x = 0; x < DISPLAY_PLOT_WIDTH; x++) {
@@ -86,15 +155,25 @@ static void display_draw_waveforms(void) {
             }
         }
     }
+    stage_finished = timer_ticks();
+    scope_state.display.render_stage_ticks[1] = stage_started - stage_finished;
+    stage_started = stage_finished;
     for (unsigned channel_index = 0; channel_index < 2; channel_index++) {
+        if (!scope_state.frame.sequence || (panel_math_mode() == 3 || panel_math_mode() == 6)) {
+            for (unsigned x = 0; x < DISPLAY_PLOT_WIDTH; x++) {
+                plot_y[scope_state.display.draw_buffer_index][channel_index][x] = -32768;
+            }
+            continue;
+        }
         unsigned range = scope_state.frame.words[0] == 0x31435348
                              ? scope_state.frame.words[8 + channel_index]
                              : scope_state.channels.range[channel_index];
         unsigned offset_dac = scope_state.frame.words[0] == 0x31435348
                                   ? (scope_state.frame.words[13] >> (channel_index * 16)) & 65535
                                   : scope_state.channels.offset_dac[channel_index];
-        if (scope_state.frame.calibration_ids[channel_index] !=
-            scope_adc_calibration_id(channel_index, range)) {
+        if (!frame_channel_matches_live_range(channel_index) ||
+            scope_state.frame.calibration_ids[channel_index] !=
+                scope_adc_calibration_id(channel_index, range)) {
             for (unsigned x = 0; x < DISPLAY_PLOT_WIDTH; x++) {
                 plot_y[scope_state.display.draw_buffer_index][channel_index][x] = -32768;
             }
@@ -151,6 +230,7 @@ static void display_draw_waveforms(void) {
             plot_y[scope_state.display.draw_buffer_index][channel_index][x] =
                 voltage_y[channel_index][code];
         }
+        unsigned trace_color = display_foreground_color(channel_index ? 0x07ff : 0xffe0);
         if (scope_state.channels.visible[channel_index]) {
             for (unsigned x = 0; x < DISPLAY_PLOT_WIDTH; x++) {
                 if (!(x & 31)) {
@@ -164,14 +244,25 @@ static void display_draw_waveforms(void) {
                                     -32768
                             ? plot_y[scope_state.display.draw_buffer_index][channel_index][x - 1]
                             : plot_y[scope_state.display.draw_buffer_index][channel_index][x],
-                        channel_index ? 0x07ff : 0xffe0,
+                        trace_color,
                         0);
                 }
             }
         }
     }
+    stage_finished = timer_ticks();
+    scope_state.display.render_stage_ticks[2] = stage_started - stage_finished;
+    stage_started = stage_finished;
     display_annotations();
+    stage_finished = timer_ticks();
+    scope_state.display.render_stage_ticks[3] = stage_started - stage_finished;
+    stage_started = stage_finished;
     hud_draw_measurements();
+    stage_finished = timer_ticks();
+    scope_state.display.render_stage_ticks[4] = stage_started - stage_finished;
+    stage_started = stage_finished;
+    panel_tools_draw();
+    scope_state.display.render_stage_ticks[5] = stage_started - timer_ticks();
     scope_state.display.buffer_ready[scope_state.display.draw_buffer_index] =
         scope_state.display.draw_buffer_valid = 1;
     scope_state.display.display_redraw_requested = 0;
@@ -203,11 +294,7 @@ void activity_poll(void) {
 }
 
 static void display_draw_activity(void) {
-    for (unsigned y = 28; y < 36; y++) {
-        for (unsigned x = 25; x < 775; x++) {
-            scope_state.display.draw_framebuffer[y * 800 + x] = 0;
-        }
-    }
+    display_fill_rectangle(25, 28, 750, 8, display_background_color());
     unsigned x = hud_text(25,
                           28,
                           scope_state.capture.live_enabled || scope_state.record.active
@@ -224,7 +311,11 @@ static void display_draw_activity(void) {
 }
 
 void display_poll(void) {
-    if (!scope_state.display.screen_on || !scope_state.frame.sequence ||
+    if (screenshot_busy()) {
+        return;
+    }
+    if (!scope_state.display.screen_on ||
+        (!scope_state.frame.sequence && scope_state.boot.stage != BOOT_ACQUIRING) ||
         (scope_state.boot.console_active && scope_state.boot.stage != BOOT_ACQUIRING)) {
         return;
     }
@@ -232,6 +323,11 @@ void display_poll(void) {
     if (scope_state.display.display_redraw_requested) {
         plot_revision++;
         scope_state.display.display_redraw_requested = 0;
+    }
+    for (unsigned buffer = 0; buffer < 2; buffer++) {
+        if (rendered_light_mode[buffer] != scope_state.display.light_mode) {
+            scope_state.display.buffer_ready[buffer] = 0;
+        }
     }
     unsigned displayed = scope_state.display.displayed_buffer_index;
     if (scope_state.display.buffer_ready[displayed] &&
@@ -252,6 +348,7 @@ void display_poll(void) {
     scope_state.display.draw_buffer_valid =
         scope_state.display.buffer_ready[scope_state.display.draw_buffer_index];
     unsigned drawing = scope_state.display.draw_buffer_index;
+    unsigned light_mode = scope_state.display.light_mode;
     if (!scope_state.display.draw_buffer_valid ||
         rendered_sequence[drawing] != scope_state.frame.sequence ||
         rendered_plot_revision[drawing] != plot_revision) {
@@ -261,8 +358,14 @@ void display_poll(void) {
         rendered_sequence[drawing] = scope_state.frame.sequence;
         rendered_plot_revision[drawing] = plot_revision;
     }
+    rendered_light_mode[drawing] = light_mode;
+    uint32_t overlay_started = timer_ticks();
+    hud_draw_status();
     hud_draw_usb_status();
     display_draw_activity();
+    panel_tools_readouts();
+    front_panel_display_draw();
+    scope_state.display.render_stage_ticks[6] = overlay_started - timer_ticks();
     rendered_overlay_revision[drawing] = overlay_revision;
     display_present((uintptr_t)scope_state.display.draw_framebuffer);
     scope_state.display.displayed_buffer_index = drawing;

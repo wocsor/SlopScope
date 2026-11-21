@@ -5,14 +5,14 @@ import hashlib
 import json
 from pathlib import Path
 
-from flash_layout import FLASH_BYTES, JOURNAL_START
+from flash_layout import FLASH_BYTES, JOURNAL_BYTES, JOURNAL_START, LEGACY_JOURNAL_START
 
 IDENTITY_START = 0x519000
 IDENTITY_BYTES = 202000
 REGIONS = {
     "application_header": (0x349000, 28),
     "identity": (IDENTITY_START, IDENTITY_BYTES),
-    "settings_at_backup": (JOURNAL_START, FLASH_BYTES - JOURNAL_START),
+    "settings_at_backup": (LEGACY_JOURNAL_START, FLASH_BYTES - LEGACY_JOURNAL_START),
 }
 
 
@@ -40,6 +40,14 @@ def preserve_unit(backup_path, output, factory_record=None):
             "bytes": length,
             "sha256": sha256(data),
         }
+    data = image[JOURNAL_START:JOURNAL_START + JOURNAL_BYTES]
+    settings_path = output / "cfw_settings_at_backup.bin"
+    with settings_path.open("xb") as stream:
+        stream.write(data)
+    manifest["cfw_settings_at_backup"] = {
+        "file": settings_path.name, "offset": JOURNAL_START,
+        "bytes": JOURNAL_BYTES, "sha256": sha256(data),
+    }
     if factory_record:
         data = factory_record.read_bytes()
         if len(data) != 0x8650 or int.from_bytes(data[0x6C:0x70], "little") != 0x069194C5:
@@ -67,6 +75,12 @@ def load_unit(directory):
         data = (directory / region["file"]).read_bytes()
         if len(data) != length or sha256(data) != region["sha256"]:
             raise ValueError(f"Unit snapshot changed: {name}")
+    if "cfw_settings_at_backup" in manifest:
+        region = manifest["cfw_settings_at_backup"]
+        data = (directory / region["file"]).read_bytes()
+        if (region["offset"] != JOURNAL_START or region["bytes"] != JOURNAL_BYTES or
+                len(data) != JOURNAL_BYTES or sha256(data) != region["sha256"]):
+            raise ValueError("Retained CFW settings snapshot changed")
     if "factory_record" in manifest:
         record = manifest["factory_record"]
         data = (directory / record["file"]).read_bytes()

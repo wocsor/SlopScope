@@ -1,5 +1,6 @@
 #include "acquisition.h"
 #include "controls.h"
+#include "tables.h"
 void scope_acquisition_defaults(struct scope_acquisition_control *acquisition_config) {
     *acquisition_config = (struct scope_acquisition_control){10000, 0, 0};
 }
@@ -46,5 +47,45 @@ int scope_acquisition_geometry_ratio(unsigned sample_rate_hz,
                                                     total_samples - (unsigned)pretrigger_samples,
                                                     depth > 7600 ? depth / 2 - 3800 : 0,
                                                     phase};
+    return 1;
+}
+
+int scope_live_acquisition_geometry(unsigned rate_index,
+                                    int32_t time_ns,
+                                    struct scope_acquisition_geometry *geometry) {
+    if (!geometry || !rate_index || rate_index >= 32) {
+        return 0;
+    }
+    unsigned plan_index = rate_index > 18 ? 18 : rate_index;
+    unsigned pretrigger = 0, posttrigger = 0, address = 0;
+    for (unsigned index = 0; index < rate_plan_counts[plan_index]; index++) {
+        unsigned reg = rate_plans[plan_index][index][0];
+        unsigned value = rate_plans[plan_index][index][1];
+        if (reg == 0x14c) {
+            pretrigger = value;
+        } else if (reg == 0x148) {
+            posttrigger = value;
+        } else if (reg == 0x200) {
+            address = value;
+        }
+    }
+    unsigned total_samples = pretrigger + posttrigger;
+    unsigned numerator = sample_rate_numerator(rate_index);
+    unsigned denominator = sample_rate_denominator(rate_index);
+    int64_t shift_samples =
+        scope_ratio((int64_t)time_ns * numerator, (uint64_t)denominator * 1000000000u);
+    int64_t shifted_pretrigger = (int64_t)pretrigger - shift_samples;
+    if (!total_samples || shifted_pretrigger < 0 || shifted_pretrigger > total_samples) {
+        return 0;
+    }
+    unsigned phase_step_samples =
+        scope_ratio((int64_t)numerator * 8, (uint64_t)denominator * 1000000000u);
+    unsigned phase = 0;
+    if (phase_step_samples) {
+        unsigned remainder = (unsigned)shifted_pretrigger % phase_step_samples;
+        phase = remainder ? remainder - 1 : phase_step_samples - 1;
+    }
+    *geometry = (struct scope_acquisition_geometry){
+        10000, (unsigned)shifted_pretrigger, total_samples - shifted_pretrigger, address, phase};
     return 1;
 }

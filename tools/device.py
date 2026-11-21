@@ -1,6 +1,7 @@
 """Exclusive text-command access for firmware maintenance tools."""
 
 import fcntl
+import hashlib
 import os
 import tempfile
 import time
@@ -16,9 +17,32 @@ PRODUCT_ID = 0xBABE
 
 
 class ScopeControl:
-    def __init__(self):
+    def __init__(self, serial_number=None, *, bus=None, address=None):
         # Share the viewer lock so maintenance cannot interrupt another client.
-        lock_path = Path(tempfile.gettempdir()) / f"hscope-deaf-babe-{os.getuid()}.lock"
+        devices = [device for device in usb.core.find(
+            find_all=True, idVendor=VENDOR_ID, idProduct=PRODUCT_ID
+        ) if (bus is None or device.bus == bus) and
+             (address is None or device.address == address)]
+        candidates = []
+        for device in devices:
+            try:
+                device_serial = device.serial_number
+            except (usb.core.USBError, ValueError):
+                device_serial = None
+            candidates.append((device, device_serial))
+        if serial_number is not None:
+            candidates = [(device, serial) for device, serial in candidates
+                          if serial == serial_number]
+        if not candidates:
+            raise RuntimeError("Requested CFW scope is not connected")
+        if len(candidates) != 1:
+            serials = ", ".join(serial or "unreadable" for _, serial in candidates)
+            raise RuntimeError(f"Multiple scopes match ({serials}); select a unique USB serial")
+        selected_device, self.serial_number = candidates[0]
+        if not self.serial_number:
+            raise RuntimeError("The scope has no readable USB serial")
+        serial_key = hashlib.sha256(self.serial_number.encode("utf-8")).hexdigest()[:24]
+        lock_path = Path(tempfile.gettempdir()) / f"hscope-deaf-babe-{os.getuid()}-{serial_key}.lock"
         self.lock = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
         self.device = None
         self.pending = b""
@@ -27,9 +51,7 @@ class ScopeControl:
                 fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 raise RuntimeError("Close the viewer or other scope client first") from None
-            self.device = usb.core.find(idVendor=VENDOR_ID, idProduct=PRODUCT_ID)
-            if self.device is None:
-                raise RuntimeError("CFW USB device is not connected")
+            self.device = selected_device
             self.device.default_timeout = 3000
             try:
                 configuration = self.device.get_active_configuration()

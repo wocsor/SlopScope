@@ -3,7 +3,8 @@
 static unsigned int restore_channel;
 
 int scope_saved_settings_valid(const struct scope_saved_settings *saved_settings) {
-    if (saved_settings->voltage_baseline > 2 || !scope_advanced_valid(&saved_settings->advanced) ||
+    if (saved_settings->brightness_percent > 100 || saved_settings->light_mode > 1 ||
+        saved_settings->voltage_baseline > 2 || !scope_advanced_valid(&saved_settings->advanced) ||
         !scope_acquisition_valid(&saved_settings->acquisition) ||
         !scope_features_valid(&saved_settings->features)) {
         return 0;
@@ -82,6 +83,8 @@ void settings_capture(struct scope_saved_settings *saved_settings) {
                 channel_index, i, &saved_settings->adc_gain[channel_index][i]);
         }
     }
+    saved_settings->brightness_percent = display_brightness();
+    saved_settings->light_mode = scope_state.display.light_mode;
     saved_settings->voltage_baseline = scope_voltage_baseline();
     saved_settings->rate = scope_state.capture.pending_rate_index
                                ? scope_state.capture.pending_rate_index
@@ -194,8 +197,12 @@ void settings_restore_poll(void) {
     scope_state.trigger.enabled = scope_state.settings.saved.trigger_enabled;
     scope_state.capture.continuous_sweep =
         scope_state.trigger.configured.sweep == 2 ? 0 : scope_state.trigger.configured.sweep;
+    display_set_brightness(scope_state.settings.saved.brightness_percent);
+    scope_state.display.light_mode = scope_state.settings.saved.light_mode;
+    scope_state.display.buffer_ready[0] = scope_state.display.buffer_ready[1] = 0;
     scope_state.display.display_redraw_requested = 1;
     scope_state.settings.restore_state = 2;
+    scope_controls_changed();
     if (scope_state.settings.saved.run) {
         uint8_t reply[CONTROL_REPLY_MAX];
         capture_begin_live(0, reply);
@@ -206,6 +213,38 @@ void settings_restore_poll(void) {
 }
 
 unsigned settings_command(const uint8_t *command, unsigned length, uint8_t *reply) {
+    if (command_equals(command, length, "DISPLAY BRIGHTNESS")) {
+        unsigned reply_length = reply_write_text(reply, "BRIGHTNESS percent=");
+        reply_length += reply_write_hex32(reply + reply_length, display_brightness());
+        reply[reply_length++] = '\n';
+        return reply_length;
+    }
+    if (length > 19 && command_equals(command, 19, "DISPLAY BRIGHTNESS ")) {
+        unsigned percent = 0;
+        for (unsigned i = 19; i < length; i++) {
+            if (command[i] < '0' || command[i] > '9' || percent > 100) {
+                return reply_write_text(reply, "ERR brightness must be 1..100\n");
+            }
+            percent = percent * 10 + command[i] - '0';
+        }
+        if (percent < 1 || percent > 100) {
+            return reply_write_text(reply, "ERR brightness must be 1..100\n");
+        }
+        display_set_brightness(percent);
+        scope_state.display.display_redraw_requested = 1;
+        return reply_write_text(reply, "OK display brightness selected\n");
+    }
+    if (command_equals(command, length, "DISPLAY THEME")) {
+        return reply_write_text(reply,
+                                scope_state.display.light_mode ? "THEME LIGHT\n" : "THEME DARK\n");
+    }
+    if (command_equals(command, length, "DISPLAY THEME LIGHT") ||
+        command_equals(command, length, "DISPLAY THEME DARK")) {
+        scope_state.display.light_mode = command_equals(command, length, "DISPLAY THEME LIGHT");
+        scope_state.display.buffer_ready[0] = scope_state.display.buffer_ready[1] = 0;
+        scope_state.display.display_redraw_requested = 1;
+        return reply_write_text(reply, "OK display theme selected\n");
+    }
     if (command_equals(command, length, "VOLTAGE BASELINE")) {
         unsigned reply_length = reply_write_text(reply, "BASELINE mode=");
         reply_length += reply_write_hex32(reply + reply_length, scope_voltage_baseline());
@@ -330,6 +369,12 @@ unsigned settings_command(const uint8_t *command, unsigned length, uint8_t *repl
         reply_length += reply_write_hex32(reply + reply_length, scope_state.settings.dirty);
         reply_length += reply_write_text(reply + reply_length, " save_error=");
         reply_length += reply_write_hex32(reply + reply_length, scope_state.settings.save_error);
+        reply_length += reply_write_text(reply + reply_length, " journal=");
+        reply_length += reply_write_hex32(reply + reply_length, SCOPE_SETTINGS_SLOT0);
+        reply_length += reply_write_text(reply + reply_length, " migration=");
+        reply_length += reply_write_hex32(reply + reply_length, scope_settings_need_migration());
+        reply_length += reply_write_text(reply + reply_length, " write_blocked=");
+        reply_length += reply_write_hex32(reply + reply_length, scope_settings_write_blocked());
         reply_length += reply_write_text(reply + reply_length, " volatile=");
         reply_length += reply_write_hex32(reply + reply_length, SCOPE_VOLATILE_SETTINGS);
         reply[reply_length++] = '\n';
